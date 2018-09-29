@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include <unordered_set>
 #include <iostream>
+#include <vulkan/vulkan.hpp>
 
 #ifndef NDEBUG
 #define ENABLE_VALIDATION_LAYERS
@@ -331,10 +332,15 @@ void Context::createLogicalDevice()
 		queueInfo.emplace_back(info);
 	}
 
+	vk::PhysicalDeviceFeatures deviceFeatures;
+	deviceFeatures.samplerAnisotropy = VK_TRUE;
+
 	// Create the logical device
 	vk::DeviceCreateInfo deviceInfo;
 	deviceInfo.pQueueCreateInfos = queueInfo.data();
 	deviceInfo.queueCreateInfoCount = static_cast<uint32_t>(queueInfo.size());
+
+	deviceInfo.pEnabledFeatures = &deviceFeatures;
 
 #ifdef ENABLE_VALIDATION_LAYERS
 	deviceInfo.enabledLayerCount = static_cast<uint32_t>(VALIDATION_LAYERS.size());

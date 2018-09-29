@@ -3,7 +3,7 @@
 
 #include "BaseApp.h"
 
-
+#include "Model.h"
 int main() 
 {
 	try 

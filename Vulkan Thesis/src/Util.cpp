@@ -1,6 +1,15 @@
 #include "Util.h"
 #include "Context.h"
-#include "ShaderCompiler.h"
+
+#include <fstream>
+#include <experimental/filesystem>
+
+#include <glslang/public/ShaderLang.h>
+#include <SPIRV/GlslangToSpv.h>
+#include <StandAlone/DirStackFileIncluder.h>
+#include <iostream>
+
+#include "lodepng.h"
 
 
 namespace
@@ -19,6 +28,26 @@ namespace
 		}
 
 		throw std::runtime_error("Failed to find suitable memory type");
+	}
+
+	EShLanguage getShaderStage(const std::string& filename)
+	{
+		std::string extension = std::experimental::filesystem::path(filename).extension().string();
+
+		if (extension == ".vert")
+			return EShLangVertex;
+		else if (extension == ".tesc")
+			return EShLangTessControl;
+		else if (extension == ".tese")
+			return EShLangTessEvaluation;
+		else if (extension == ".geom")
+			return EShLangGeometry;
+		else if (extension == ".frag")
+			return EShLangFragment;
+		else if (extension == ".comp")
+			return EShLangCompute;
+		else
+			throw std::runtime_error("Invalid shader suffix: " + extension);
 	}
 }
 
@@ -55,6 +84,67 @@ std::array<vk::VertexInputAttributeDescription, 4> util::getVertexAttributeDescr
 	descriptions[3].offset = offsetof(Vertex, normal);
 
 	return descriptions;
+}
+
+#include "ShaderResourceConfig.inl"
+std::vector<uint32_t> util::compileShader(const std::string& filename)
+{
+	static bool initDummy = glslang::InitializeProcess();
+
+	std::ifstream file(filename);
+
+	if (!file.is_open())
+		throw std::runtime_error("Failed to open shader file: " + filename);
+
+	std::string inputGLSL((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+	const char* inputString = inputGLSL.c_str();
+
+	EShLanguage shaderType = getShaderStage(filename);
+
+	glslang::TShader shader(shaderType);
+	shader.setStrings(&inputString, 1);
+	shader.setEnvInput(glslang::EShSourceGlsl, shaderType, glslang::EShClientVulkan, 100);
+	shader.setEnvClient(glslang::EShClientVulkan, glslang::EshTargetClientVersion::EShTargetVulkan_1_1);
+	shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetLanguageVersion::EShTargetSpv_1_3);
+
+	DirStackFileIncluder includer;
+	includer.pushExternalLocalDirectory(std::experimental::filesystem::path(filename).parent_path().string());
+
+	EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
+	std::string preprocessedGLSL;
+	if (!shader.preprocess(&defaultTBuiltInResource, 110, ENoProfile, false, false, messages, &preprocessedGLSL, includer))
+		throw std::runtime_error("Failed to preprocess file: " + filename);
+	// TODO LOG
+
+	const char* preprocessedCstr = preprocessedGLSL.c_str();
+	shader.setStrings(&preprocessedCstr, 1);
+
+	if (!shader.parse(&defaultTBuiltInResource, 110, false, messages))
+	{
+		std::string log = "Failed to parse file: " + filename + "\n";
+		log += shader.getInfoLog();		//TODO make LOGGER
+		log += shader.getInfoDebugLog();
+
+		throw std::runtime_error(log);
+	}
+
+	glslang::TProgram program;
+	program.addShader(&shader);
+
+	if (!program.link(messages))
+	{
+		std::cout << shader.getInfoLog() << std::endl;		//TODO make LOGGER
+		std::cout << shader.getInfoDebugLog() << std::endl;
+
+		throw std::runtime_error("Failed to link program: " + filename);
+	}
+
+	std::vector<uint32_t> spirV;
+	spv::SpvBuildLogger logger;
+	glslang::SpvOptions spvOptions;
+	glslang::GlslangToSpv(*program.getIntermediate(shaderType), spirV, &logger, &spvOptions);
+
+	return spirV;
 }
 
 Utility::Utility(const Context& context)
@@ -213,6 +303,47 @@ vk::UniqueImageView Utility::createImageView(vk::Image image, vk::Format format,
 	return mContext.getDevice().createImageViewUnique(viewInfo);
 }
 
+ImageParameters Utility::loadImageFromFile(std::string path)
+{
+	// load image file
+	unsigned width, height;
+	std::vector<unsigned char> pixels;
+
+	if (lodepng::decode(pixels, width, height, path))
+		throw std::runtime_error("Failed to load png file");
+
+	// create staging image memory
+	auto stagingBuffer = createBuffer(
+		width * height * 4,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+
+	// copy image to staging memory
+	void* data;
+	vkMapMemory(mContext.getDevice(), *stagingBuffer.memory, 0, stagingBuffer.size, 0, &data);
+	memcpy(data, pixels.data(), static_cast<uint32_t>(stagingBuffer.size));
+	vkUnmapMemory(mContext.getDevice(), *stagingBuffer.memory);
+
+	auto image = createImage(
+		width, height,
+		vk::Format::eR8G8B8A8Unorm,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
+
+	auto cmd = beginSingleTimeCommands();
+	recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+	recordCopyBuffer(cmd, *stagingBuffer.handle, *image.handle, width, height);
+	recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+	endSingleTimeCommands(cmd);
+
+	image.view = createImageView(*image.handle, vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
+
+	return image;
+}
+
 vk::CommandBuffer Utility::beginSingleTimeCommands()
 {
 	vk::CommandBufferAllocateInfo allocInfo;
@@ -256,6 +387,23 @@ void Utility::recordCopyBuffer(vk::CommandBuffer cmdBuffer, vk::Buffer src, vk::
 	cmdBuffer.copyBuffer(src, dst, copyRegion);
 }
 
+void Utility::recordCopyBuffer(vk::CommandBuffer cmdBuffer, vk::Buffer src, vk::Image dst, uint32_t width, uint32_t height, vk::DeviceSize srcOffset)
+{
+	vk::ImageSubresourceLayers subresource;
+	subresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+	subresource.baseArrayLayer = 0;
+	subresource.mipLevel = 0;
+	subresource.layerCount = 1;
+
+	vk::BufferImageCopy region;
+	region.bufferOffset = 0;
+	region.imageSubresource = subresource;
+	region.imageOffset = vk::Offset3D(0, 0, 0);
+	region.imageExtent = vk::Extent3D(width, height, 1);
+
+	cmdBuffer.copyBufferToImage(src, dst, vk::ImageLayout::eTransferDstOptimal, region);
+}
+
 void Utility::recordCopyImage(vk::CommandBuffer cmdBuffer, vk::Image src, vk::Image dst, uint32_t width, uint32_t height)
 {
 	vk::ImageSubresourceLayers subresource;
@@ -297,26 +445,36 @@ void Utility::recordTransitImageLayout(vk::CommandBuffer cmdBuffer, vk::Image im
 	barrier.subresourceRange.baseArrayLayer = 0;
 	barrier.subresourceRange.layerCount = 1;
 
-	if (oldLayout == vk::ImageLayout::ePreinitialized && newLayout == vk::ImageLayout::eTransferSrcOptimal)
+	vk::PipelineStageFlags srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
+	vk::PipelineStageFlags dstStage = vk::PipelineStageFlagBits::eTopOfPipe;
+
+	//if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferSrcOptimal)
+	//{
+	//	// dst must wait on src
+	//	barrier.srcAccessMask = vk::AccessFlagBits::eHostWrite;
+	//	barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+	//	srcStage = vk::PipelineStageFlagBits::eHost;
+	//	dstStage = vk::PipelineStageFlagBits::eTransfer;
+	//}
+	//else 
+	if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal)
 	{
-		// dst must wait on src
-		barrier.srcAccessMask = vk::AccessFlagBits::eHostWrite;
-		barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-	}
-	else if (oldLayout == vk::ImageLayout::ePreinitialized && newLayout == vk::ImageLayout::eTransferDstOptimal)
-	{
-		barrier.srcAccessMask = vk::AccessFlagBits::eHostWrite;
+		barrier.srcAccessMask = {};
 		barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+		dstStage = vk::PipelineStageFlagBits::eTransfer;
 	}
 	else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
 	{
 		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderWrite;
+		srcStage = vk::PipelineStageFlagBits::eTransfer;
+		dstStage = vk::PipelineStageFlagBits::eFragmentShader;
 	}
 	else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal)
 	{
 		barrier.srcAccessMask = {};
 		barrier.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead	| vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+		dstStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
 	}
 	else if (oldLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
 	{
@@ -335,6 +493,6 @@ void Utility::recordTransitImageLayout(vk::CommandBuffer cmdBuffer, vk::Image im
 	}
 	else
 		throw std::runtime_error("Unsupported layout transition");
-
-	cmdBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eEarlyFragmentTests, {}, nullptr, nullptr, barrier);
+	
+	cmdBuffer.pipelineBarrier(srcStage, dstStage, {}, nullptr, nullptr, barrier);
 }

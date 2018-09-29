@@ -5,7 +5,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/hash.hpp>
 
-
 class Context;
 
 struct BufferParameters
@@ -26,6 +25,7 @@ namespace util
 {
 	vk::VertexInputBindingDescription getVertexBindingDesciption();
 	std::array<vk::VertexInputAttributeDescription, 4> getVertexAttributeDescriptions();
+	std::vector<uint32_t> compileShader(const std::string& filename);
 
 	struct Vertex
 	{
@@ -49,6 +49,11 @@ namespace util
 			return seed;
 		}
 	};
+
+	inline bool isNearlyEqual(float a, float b, float tolerance = 1e-8f)
+	{
+		return glm::abs(a - b) <= tolerance;
+	}
 }
 
 class Utility
@@ -69,10 +74,13 @@ public:
 	void transitImageLayout(vk::Image image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
 	vk::UniqueImageView createImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags flags);
 
+	ImageParameters loadImageFromFile(std::string path);
+
 	vk::CommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(vk::CommandBuffer buffer);
 
 	void recordCopyBuffer(vk::CommandBuffer cmdBuffer, vk::Buffer src, vk::Buffer dst, vk::DeviceSize size, vk::DeviceSize srcOffset = 0, vk::DeviceSize dstOffset = 0);
+	void recordCopyBuffer(vk::CommandBuffer cmdBuffer, vk::Buffer src, vk::Image dst, uint32_t width, uint32_t height, vk::DeviceSize srcOffset = 0);
 	void recordCopyImage(vk::CommandBuffer cmdBuffer, vk::Image src, vk::Image dst, uint32_t width, uint32_t height);
 	void recordTransitImageLayout(vk::CommandBuffer cmdBuffer, vk::Image image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
 private:

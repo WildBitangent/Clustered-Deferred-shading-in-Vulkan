@@ -4,19 +4,18 @@
 
 #include "Context.h"
 #include "Model.h"
-#include "ShaderCompiler.h"
 
 struct PushConstantObject
 {
 };
 
-struct Camera
+struct CameraUBO
 {
 	glm::mat4 view;
 	glm::mat4 projection;
 };
 
-struct SceneObject
+struct SceneObjectUBO
 {
 	glm::mat4 model;
 };
@@ -28,19 +27,18 @@ Renderer::Renderer(GLFWwindow* window)
 	createSwapChain();
 	createSwapChainImageViews();
 	createRenderPasses();
-	//createDescriptorSetLayouts();
+	createDescriptorSetLayouts();
 	createGraphicsPipelines();
 	//createComputePipeline();
 	createDepthResources();
 	createFrameBuffers();
-	//createTextureSampler();
-	//createUniformBuffers();
+	createTextureSampler();
+	createUniformBuffers();
 	////createLights();
-	//createDescriptorPool();
-	mModel.loadModel(mContext, "", *mTextureSampler, *mDescriptorPool, *mObjectDescriptorSetLayout);
-	////model = VModel::loadModelFromFile(vulkan_context, getGlobalTestSceneConfiguration().model_file, texture_sampler.get(), descriptor_pool.get(), material_descriptor_set_layout.get());
-	//createSceneObjectDescriptorSet();
-	//createCameraDescriptorSet();
+	createDescriptorPool();
+	mModel.loadModel(mContext, "data/models/sponza.obj", *mTextureSampler, *mDescriptorPool, *mMaterialDescriptorSetLayout);
+	createSceneObjectDescriptorSet();
+	createCameraDescriptorSet();
 	////createIntermediateDescriptorSet();
 	////updateIntermediateDescriptorSet();
 	////createLigutCullingDescriptorSet();
@@ -53,7 +51,7 @@ Renderer::Renderer(GLFWwindow* window)
 
 void Renderer::requestDraw(float deltatime)
 {
-	//updateUniformBuffers(/*deltatime*/);
+	updateUniformBuffers(/*deltatime*/);
 	drawFrame();
 }
 
@@ -182,16 +180,7 @@ void Renderer::createRenderPasses()
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
 		subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-		// overwrite subpass dependency to make it wait until VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-		//vk::SubpassDependency dependency;
-		//dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-		//dependency.dstSubpass = 0; // 0  refers to the subpass
-		//dependency.srcStageMask = vk::PipelineStageFlagBits::eBottomOfPipe;
-		//dependency.srcAccessMask = vk::AccessFlagBits::eMemoryRead;
-		//dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-		//dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite;
-
+		
 		std::array<vk::SubpassDependency, 2> dependencies;
 		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 		dependencies[0].dstSubpass = 0; 
@@ -207,7 +196,6 @@ void Renderer::createRenderPasses()
 		dependencies[1].srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 		dependencies[1].dstAccessMask = vk::AccessFlagBits::eMemoryRead;
 		dependencies[1].dependencyFlags = vk::DependencyFlagBits::eByRegion;
-
 
 		std::array<vk::AttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
 
@@ -229,19 +217,13 @@ void Renderer::createDescriptorSetLayouts()
 	{
 		// Transform information
 		// create descriptor for uniform buffer objects
-		vk::DescriptorSetLayoutBinding samplerBinding;
-		samplerBinding.binding = 0;
-		samplerBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		samplerBinding.descriptorCount = 1;
-		samplerBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
-
 		vk::DescriptorSetLayoutBinding uboBinding;
-		uboBinding.binding = 1;
+		uboBinding.binding = 0;
 		uboBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
 		uboBinding.descriptorCount = 1;
-		uboBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+		uboBinding.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
 
-		std::array<vk::DescriptorSetLayoutBinding, 2> bindings = { samplerBinding, uboBinding };
+		std::array<vk::DescriptorSetLayoutBinding, 1> bindings = { uboBinding };
 
 		vk::DescriptorSetLayoutCreateInfo layoutInfo;
 		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -254,7 +236,7 @@ void Renderer::createDescriptorSetLayouts()
 	{
 		vk::DescriptorSetLayoutBinding cameraBinding;
 		cameraBinding.binding = 0;
-		cameraBinding.descriptorType = vk::DescriptorType::eStorageBuffer;
+		cameraBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
 		cameraBinding.descriptorCount = 1;
 		cameraBinding.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute;
 
@@ -263,6 +245,35 @@ void Renderer::createDescriptorSetLayouts()
 		createInfo.pBindings = &cameraBinding;
 
 		mCameraDescriptorSetLayout = mContext.getDevice().createDescriptorSetLayoutUnique(createInfo);
+	}
+
+	// material
+	{
+		vk::DescriptorSetLayoutBinding uniformBinding;
+		uniformBinding.binding = 0;
+		uniformBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+		uniformBinding.descriptorCount = 1;
+		uniformBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+		vk::DescriptorSetLayoutBinding albedoMapBinding;
+		albedoMapBinding.binding = 1;
+		albedoMapBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		albedoMapBinding.descriptorCount = 1;
+		albedoMapBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+		vk::DescriptorSetLayoutBinding normalMapBinding;
+		normalMapBinding.binding = 2;
+		normalMapBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		normalMapBinding.descriptorCount = 1;
+		normalMapBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+		std::array<vk::DescriptorSetLayoutBinding, 3> bindings = { uniformBinding, albedoMapBinding, normalMapBinding };
+
+		vk::DescriptorSetLayoutCreateInfo createInfo;
+		createInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+		createInfo.pBindings = bindings.data();
+
+		mMaterialDescriptorSetLayout = mContext.getDevice().createDescriptorSetLayoutUnique(createInfo);
 	}
 }
 
@@ -325,7 +336,7 @@ void Renderer::createGraphicsPipelines()
 		rasterizer.rasterizerDiscardEnable = VK_FALSE;
 		rasterizer.polygonMode = vk::PolygonMode::eFill;
 		rasterizer.lineWidth = 1.0f; // requires wideLines feature enabled when larger than one
-		rasterizer.cullMode = vk::CullModeFlagBits::eNone;
+		rasterizer.cullMode = vk::CullModeFlagBits::eBack;
 		rasterizer.frontFace = vk::FrontFace::eCounterClockwise; // inverted Y during projection matrix
 		rasterizer.depthBiasEnable = VK_FALSE;
 		rasterizer.depthBiasConstantFactor = 0.0f; // Optional
@@ -355,8 +366,6 @@ void Renderer::createGraphicsPipelines()
 		colorblendAttachment.blendEnable = VK_FALSE;
 		colorblendAttachment.srcColorBlendFactor = vk::BlendFactor::eOne;
 		colorblendAttachment.dstColorBlendFactor = vk::BlendFactor::eZero;
-		//colorblendAttachment.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
-		//colorblendAttachment.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
 		colorblendAttachment.colorBlendOp = vk::BlendOp::eAdd;
 		colorblendAttachment.srcAlphaBlendFactor = vk::BlendFactor::eOne;
 		colorblendAttachment.dstAlphaBlendFactor = vk::BlendFactor::eZero;
@@ -386,9 +395,9 @@ void Renderer::createGraphicsPipelines()
 
 		// no uniform variables or push constants
 		vk::PipelineLayoutCreateInfo layoutInfo;
-		//std::vector<vk::DescriptorSetLayout> setLayouts = { *mObjectDescriptorSetLayout, *mCameraDescriptorSetLayout };
-		//layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
-		//layoutInfo.pSetLayouts = setLayouts.data(); 
+		std::vector<vk::DescriptorSetLayout> setLayouts = { *mObjectDescriptorSetLayout, *mCameraDescriptorSetLayout, *mMaterialDescriptorSetLayout };
+		layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
+		layoutInfo.pSetLayouts = setLayouts.data(); 
 		//layoutInfo.pushConstantRangeCount = 1; 
 		//layoutInfo.pPushConstantRanges = &pushconstantRange; 
 
@@ -489,7 +498,7 @@ void Renderer::createUniformBuffers()
 {
 	// create buffers for scene object
 	{
-		vk::DeviceSize bufferSize = sizeof(SceneObject);
+		vk::DeviceSize bufferSize = sizeof(SceneObjectUBO);
 
 		mObjectStagingBuffer = mUtility.createBuffer(
 			bufferSize, 
@@ -506,8 +515,9 @@ void Renderer::createUniformBuffers()
 
 	// Adding data to scene object buffer
 	{
-		SceneObject ubo;
-		ubo.model = glm::mat4(1.0f);
+		SceneObjectUBO ubo;
+		ubo.model = glm::scale(glm::mat4(1.f), glm::vec3(0.01f)); // TODO update uniform for objects
+		//ubo.model[3][3] = 1.0f;
 
 		auto data = mContext.getDevice().mapMemory(*mObjectStagingBuffer.memory, 0, sizeof(ubo), {});
 		memcpy(data, &ubo, sizeof(ubo));
@@ -517,7 +527,7 @@ void Renderer::createUniformBuffers()
 
 	// camera 
 	{
-		vk::DeviceSize bufferSize = sizeof(Camera);
+		vk::DeviceSize bufferSize = sizeof(CameraUBO);
 
 		mCameraStagingBuffer = mUtility.createBuffer(
 			bufferSize,
@@ -527,7 +537,7 @@ void Renderer::createUniformBuffers()
 		
 		mCameraUniformBuffer = mUtility.createBuffer(
 			bufferSize,
-			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eUniformBuffer,
 			vk::MemoryPropertyFlagBits::eDeviceLocal
 		);
 	}
@@ -564,7 +574,7 @@ void Renderer::createSceneObjectDescriptorSet()
 	vk::DescriptorBufferInfo bufferInfo;
 	bufferInfo.buffer = *mObjectUniformBuffer.handle;
 	bufferInfo.offset = 0;
-	bufferInfo.range = sizeof(SceneObject);
+	bufferInfo.range = sizeof(SceneObjectUBO);
 
 	vk::WriteDescriptorSet descriptorWrites;
 	descriptorWrites.dstSet = mObjectDescriptorSet;
@@ -573,8 +583,6 @@ void Renderer::createSceneObjectDescriptorSet()
 	descriptorWrites.descriptorType = vk::DescriptorType::eUniformBuffer;
 	descriptorWrites.descriptorCount = 1;
 	descriptorWrites.pBufferInfo = &bufferInfo;
-	descriptorWrites.pImageInfo = nullptr; // Optional
-	descriptorWrites.pTexelBufferView = nullptr; // Optional
 
 	mContext.getDevice().updateDescriptorSets(descriptorWrites, nullptr);
 }
@@ -597,7 +605,7 @@ void Renderer::createCameraDescriptorSet()
 		vk::DescriptorBufferInfo cameraInfo;
 		cameraInfo.buffer = *mCameraUniformBuffer.handle;
 		cameraInfo.offset = 0;
-		cameraInfo.range = sizeof(Camera);
+		cameraInfo.range = sizeof(CameraUBO);
 
 		vk::WriteDescriptorSet descriptorWrites;
 		descriptorWrites.dstSet = mCameraDescriptorSet;
@@ -655,14 +663,14 @@ void Renderer::createGraphicsCommandBuffers()
 			//cmdBuffer.pushConstants(*mPipelineLayout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(pco), &pco);
 			cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *mGraphicsPipeline);
 
-			//std::array<vk::DescriptorSet, 2> descriptorSets = { mObjectDescriptorSet, mCameraDescriptorSet };
-			//cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *mPipelineLayout, 0, descriptorSets, nullptr);
+			std::array<vk::DescriptorSet, 2> descriptorSets = { mObjectDescriptorSet, mCameraDescriptorSet };
+			cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *mPipelineLayout, 0, descriptorSets, nullptr);
 
 			for (const auto& part : mModel.getMeshParts())
 			{
 				cmdBuffer.bindVertexBuffers(0, part.vertexBufferSection.handle, part.vertexBufferSection.offset);
 				cmdBuffer.bindIndexBuffer(part.indexBufferSection.handle, part.indexBufferSection.offset, vk::IndexType::eUint32);
-				//cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *mPipelineLayout, static_cast<uint32_t>(descriptorSets.size()), part.materialDescriptorSet, nullptr);
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *mPipelineLayout, static_cast<uint32_t>(descriptorSets.size()), part.materialDescriptorSet, nullptr);
 				cmdBuffer.drawIndexed(part.indexCount, 1, 0, 0, 0);
 			}
 			cmdBuffer.endRenderPass();
@@ -803,7 +811,7 @@ void Renderer::updateUniformBuffers()
 {
 	// update camera ubo
 	{
-		Camera cameraUbo = {};
+		CameraUBO cameraUbo = {};
 		cameraUbo.view = mViewMatrix;
 		cameraUbo.projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.5f, 100.0f);
 		cameraUbo.projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
@@ -873,7 +881,7 @@ void Renderer::drawFrame()
 
 vk::UniqueShaderModule Renderer::createShaderModule(const std::string& filename)
 {
-	auto spirv = compileShader(filename);
+	auto spirv = util::compileShader(filename);
 
 	vk::ShaderModuleCreateInfo shaderInfo;
 	shaderInfo.codeSize = spirv.size() * sizeof(uint32_t);

@@ -68,6 +68,7 @@ private:
 
 	vk::UniqueDescriptorSetLayout mObjectDescriptorSetLayout;
 	vk::UniqueDescriptorSetLayout mCameraDescriptorSetLayout;
+	vk::UniqueDescriptorSetLayout mMaterialDescriptorSetLayout;
 	vk::UniquePipelineLayout mPipelineLayout;
 	vk::UniquePipeline mGraphicsPipeline;
 
@@ -100,6 +101,6 @@ private:
 	vk::DescriptorSet mObjectDescriptorSet;
 	vk::DescriptorSet mCameraDescriptorSet;
 
-	glm::mat4 mViewMatrix;
+	glm::mat4 mViewMatrix = glm::lookAt(glm::vec3(-2.5f, 0.f, 2.f), glm::vec3(0.f, 0.f, 0.75f), glm::vec3(0.f, 0.f, 1.f));;
 };
 
