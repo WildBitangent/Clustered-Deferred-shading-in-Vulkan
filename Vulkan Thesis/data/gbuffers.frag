@@ -1,0 +1,42 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(set = 2, binding = 0) uniform MaterialUBO
+{
+	int hasAlbedoMap;
+	int hasNormalMap;
+	int hasSpecularMap;
+} material;
+
+layout(set = 2, binding = 1) uniform sampler2D albedoSampler;
+layout(set = 2, binding = 2) uniform sampler2D normalSampler;
+layout(set = 2, binding = 3) uniform sampler2D specularSampler;
+
+layout(location = 0) in vec3 worldPos;
+layout(location = 1) in vec2 texCoord;
+layout(location = 2) in vec3 color;
+layout(location = 3) in vec3 normal;
+
+layout(location = 0) out vec3 outPosition;
+layout(location = 1) out vec4 outColor;
+layout(location = 2) out vec4 outNormal;
+
+void main() 
+{
+	float specular = 0.0;
+
+	outPosition = worldPos;
+
+	if (material.hasAlbedoMap > 0)
+		outColor = texture(albedoSampler, texCoord);
+	else
+		outColor = vec4(1.0, 0.078, 0.576, 1.0);
+
+	if (material.hasSpecularMap > 0)
+		specular = texture(specularSampler, texCoord).r;
+
+	if (material.hasNormalMap > 0)
+		outNormal = vec4(texture(normalSampler, texCoord).rgb, specular);
+	else
+		outNormal = vec4(vec3(1.0), specular);
+}

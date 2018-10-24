@@ -264,7 +264,7 @@ ImageParameters Utility::createImage(uint32_t width, uint32_t height, vk::Format
 	auto memory = mContext.getDevice().allocateMemoryUnique(allocInfo);
 	mContext.getDevice().bindImageMemory(*image, *memory, 0);
 
-	return ImageParameters{ std::move(image), vk::UniqueImageView(), std::move(memory) };
+	return ImageParameters{ std::move(image), vk::UniqueImageView(), std::move(memory), format };
 }
 
 void Utility::copyImage(vk::Image srcImage, vk::Image dstImage, uint32_t width, uint32_t height)
@@ -491,6 +491,10 @@ void Utility::recordTransitImageLayout(vk::CommandBuffer cmdBuffer, vk::Image im
 		barrier.srcAccessMask = {};
 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 	}
+	// else if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eColorAttachmentOptimal)
+	// {
+	// 	
+	// }
 	else
 		throw std::runtime_error("Unsupported layout transition");
 	

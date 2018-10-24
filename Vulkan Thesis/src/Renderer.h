@@ -4,6 +4,7 @@
 #include "Context.h"
 #include "Util.h"
 #include "Model.h"
+#include "Resource.h"
 
 struct GLFWwindow;
 
@@ -16,7 +17,7 @@ public:
 	void requestDraw(float deltatime);
 	void cleanUp();
 
-	void setCamera(const glm::mat4 & view, const glm::vec3 campos);
+	void setCamera(const glm::mat4& view, const glm::vec3 campos);
 
 private:
 	void recreateSwapChain();
@@ -25,15 +26,16 @@ private:
 	void createSwapChainImageViews();
 	void createRenderPasses();
 	void createDescriptorSetLayouts();
+	void createPipelineCache();
 	void createGraphicsPipelines();
-	void createDepthResources();
-	void createFrameBuffers();
-	void createTextureSampler();
+	void createGBuffers();
+	// void createFrameBuffers();
+	// void createTextureSampler();
 	void createUniformBuffers();
-	//void createLights();
+	void createLights();
 	void createDescriptorPool();
-	void createSceneObjectDescriptorSet();
-	void createCameraDescriptorSet();
+	// void createSceneObjectDescriptorSet();
+	void createDescriptorSets();
 	//void createIntermediateDescriptorSet();
 	//void updateIntermediateDescriptorSet();
 	void createGraphicsCommandBuffers();
@@ -55,32 +57,35 @@ private:
 	Context mContext;
 	Utility mUtility;
 	Model mModel;
+	vk::UniqueDescriptorPool mDescriptorPool;
+	resource::Resources mResource;
 
 	vk::UniqueSwapchainKHR mSwapchain;
 	std::vector<vk::Image> mSwapchainImages;
+	std::vector<vk::UniqueImageView> mSwapchainImageViews;
 	vk::Format mSwapchainImageFormat;
 	vk::Extent2D mSwapchainExtent;
-	std::vector<vk::UniqueImageView> mSwapchainImageViews;
-	std::vector<vk::UniqueFramebuffer> mSwapchainFramebuffers;
-	std::vector<vk::CommandBuffer> mCommandBuffers;
 
-	vk::UniqueRenderPass mRenderpass;
+	vk::UniquePipelineCache mPipelineCache;
 
-	vk::UniqueDescriptorSetLayout mObjectDescriptorSetLayout;
-	vk::UniqueDescriptorSetLayout mCameraDescriptorSetLayout;
-	vk::UniqueDescriptorSetLayout mMaterialDescriptorSetLayout;
-	vk::UniquePipelineLayout mPipelineLayout;
-	vk::UniquePipeline mGraphicsPipeline;
-
-	vk::UniquePipeline mComputePipeline;
-	vk::UniquePipelineLayout mComputePipelineLayout;
-	vk::CommandBuffer mComputeCommandBuffer;
+	std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
+	vk::UniqueCommandBuffer mLightCullingCommandBuffer;
+	vk::UniqueCommandBuffer mGBufferCommandBuffer;
 
 	vk::UniqueSemaphore mImageAvailableSemaphore;
+	vk::UniqueSemaphore mGBufferFinishedSemaphore;
+	vk::UniqueSemaphore mLightCullingFinishedSemaphore;
 	vk::UniqueSemaphore mRenderFinishedSemaphore;
 
-	// depth image
+	// G Buffer
+	GBuffer mGBufferAttachments;
+	vk::UniqueRenderPass mGBufferRenderpass;
+	vk::UniqueFramebuffer mGBufferFramebuffer;
+
+	// composition
 	ImageParameters mDepthImage;
+	vk::UniqueRenderPass mCompositionRenderpass;
+	std::vector<vk::UniqueFramebuffer> mSwapchainFramebuffers;
 
 	// texture image
 	vk::UniqueImage mTextureImage; // TODO image parameters
@@ -89,18 +94,21 @@ private:
 	//VRaii<VkImage normalmap_image;
 	//VRaii<VkDeviceMemory normalmap_image_memory;
 	//VRaii<VkImageView normalmap_image_view;
-	vk::UniqueSampler mTextureSampler;
+	// vk::UniqueSampler mTextureSampler;
 
 	// uniform buffers
-	BufferParameters mObjectStagingBuffer;
+	BufferParameters mObjectStagingBuffer; // TODO cahnge to host visible/coherent?
 	BufferParameters mObjectUniformBuffer;
 	BufferParameters mCameraStagingBuffer;
 	BufferParameters mCameraUniformBuffer;
 
-	vk::UniqueDescriptorPool mDescriptorPool;
-	vk::DescriptorSet mObjectDescriptorSet;
-	vk::DescriptorSet mCameraDescriptorSet;
+	// TODO refactor
+	BufferParameters mLightsOutBuffer;
+
+	BufferParameters mPointLightsStagingBuffer;
+	BufferParameters mPointLightsBuffer;
 
 	glm::mat4 mViewMatrix = glm::lookAt(glm::vec3(-2.5f, 0.f, 2.f), glm::vec3(0.f, 0.f, 0.75f), glm::vec3(0.f, 0.f, 1.f));;
+	glm::vec3 mCameraPosition;
 };
 

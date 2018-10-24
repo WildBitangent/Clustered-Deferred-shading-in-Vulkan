@@ -19,6 +19,16 @@ struct ImageParameters
 	vk::UniqueImage handle;
 	vk::UniqueImageView view;
 	vk::UniqueDeviceMemory memory;
+	vk::Format format;
+};
+
+struct GBuffer
+{
+	ImageParameters depth;
+	ImageParameters position;
+	ImageParameters color;
+	ImageParameters normal;
+	vk::UniqueSampler sampler;
 };
 
 namespace util
@@ -53,6 +63,11 @@ namespace util
 	inline bool isNearlyEqual(float a, float b, float tolerance = 1e-8f)
 	{
 		return glm::abs(a - b) <= tolerance;
+	}
+
+	namespace init
+	{
+		// vk::WriteDescriptorSet writeDescriptorSet(vk::DescriptorSet target, )
 	}
 }
 

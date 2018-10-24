@@ -76,7 +76,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\GLFW\lib-vc2015;$(LibraryPath)</LibraryPath>
+    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -176,6 +176,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\Resource.cpp" />
     <ClCompile Include="src\Util.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
@@ -187,6 +188,7 @@
     <ClInclude Include="src\lodepng.h" />
     <ClInclude Include="src\Model.h" />
     <ClInclude Include="src\Renderer.h" />
+    <ClInclude Include="src\Resource.h" />
     <ClInclude Include="src\tiny_obj_loader.h" />
     <ClInclude Include="src\Util.h" />
   </ItemGroup>

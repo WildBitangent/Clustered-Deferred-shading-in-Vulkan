@@ -1,9 +1,10 @@
 #pragma once
 #include <vector>
 #include <vulkan/vulkan.hpp>
+
 #include "Context.h"
 #include "Util.h"
-
+#include "Resource.h"
 
 struct BufferSection
 {
@@ -25,10 +26,11 @@ struct MeshPart
 	BufferSection indexBufferSection;
 	BufferSection materialUniformSection;
 
-	vk::DescriptorSet materialDescriptorSet; // TODO: global material atlas
+	std::string materialDescriptorSetKey = "material.";
 
 	vk::ImageView albedoMap; // Should be just references // TODO refactor
 	vk::ImageView normalMap;
+	vk::ImageView specularMap;
 
 	uint32_t indexCount = 0;
 
@@ -51,7 +53,7 @@ public:
 	Model& operator=(Model&& model) = default;
 
 	void loadModel(const Context& context, const std::string& path, const vk::Sampler& textureSampler,
-		const vk::DescriptorPool& descriptorPool, const vk::DescriptorSetLayout& materialDescriptorSetLayout); // TODO: refactor
+		const vk::DescriptorPool& descriptorPool, resource::Resources& resources); // TODO: refactor
 
 	const std::vector<MeshPart>& getMeshParts() const;
 
