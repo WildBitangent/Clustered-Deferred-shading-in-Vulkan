@@ -13,7 +13,7 @@ struct Camera
 
 	glm::mat4 getViewMatrix() const
 	{
-		return glm::transpose(glm::toMat4(rotation)) * glm::translate(glm::mat4(1.0f), -position); // equal to inv(TR) 
+		return glm::transpose(glm::toMat4(rotation)) * glm::translate(glm::mat4(1.0f), -position);
 	}
 };
 

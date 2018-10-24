@@ -78,8 +78,17 @@ void Renderer::cleanUp()
 
 void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 {
-	mViewMatrix = view;
-	mCameraPosition = campos;
+	// update camera ubo
+	{
+		auto data = reinterpret_cast<CameraUBO*>(mContext.getDevice().mapMemory(*mCameraStagingBuffer.memory, 0, sizeof(CameraUBO)));
+		data->view = view;
+		data->projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.5f, 100.0f);
+		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
+		data->cameraPosition = campos;
+
+		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
+		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
+	}
 }
 
 void Renderer::recreateSwapChain()
@@ -1348,17 +1357,6 @@ void Renderer::createComputeCommandBuffer()
 
 void Renderer::updateUniformBuffers()
 {
-	// update camera ubo
-	{
-		auto data = reinterpret_cast<CameraUBO*>(mContext.getDevice().mapMemory(*mCameraStagingBuffer.memory, 0, sizeof(CameraUBO)));
-		data->view = mViewMatrix;
-		data->projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.5f, 100.0f);
-		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
-		data->cameraPosition = mCameraPosition;
-		
-		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
-		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
-	}
 
 	// // update model
 	// {

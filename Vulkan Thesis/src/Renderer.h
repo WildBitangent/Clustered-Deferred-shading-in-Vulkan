@@ -87,15 +87,6 @@ private:
 	vk::UniqueRenderPass mCompositionRenderpass;
 	std::vector<vk::UniqueFramebuffer> mSwapchainFramebuffers;
 
-	// texture image
-	vk::UniqueImage mTextureImage; // TODO image parameters
-	vk::UniqueDeviceMemory mTextureImageMemory;
-	vk::UniqueImageView mTextureImageView;
-	//VRaii<VkImage normalmap_image;
-	//VRaii<VkDeviceMemory normalmap_image_memory;
-	//VRaii<VkImageView normalmap_image_view;
-	// vk::UniqueSampler mTextureSampler;
-
 	// uniform buffers
 	BufferParameters mObjectStagingBuffer; // TODO cahnge to host visible/coherent?
 	BufferParameters mObjectUniformBuffer;
@@ -107,8 +98,5 @@ private:
 
 	BufferParameters mPointLightsStagingBuffer;
 	BufferParameters mPointLightsBuffer;
-
-	glm::mat4 mViewMatrix = glm::lookAt(glm::vec3(-2.5f, 0.f, 2.f), glm::vec3(0.f, 0.f, 0.75f), glm::vec3(0.f, 0.f, 1.f));;
-	glm::vec3 mCameraPosition;
 };
 
