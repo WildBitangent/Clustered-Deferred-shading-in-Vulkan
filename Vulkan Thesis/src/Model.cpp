@@ -139,7 +139,7 @@ namespace
 			if (!materials[i].normal_texname.empty())
 				materialGroups[i + 1].normalMapPath = (folder / materials[i].normal_texname).string();
 			if (!materials[i].specular_texname.empty())
-				materialGroups[i + 1].specularMapPath = (folder / materials[i].normal_texname).string();
+				materialGroups[i + 1].specularMapPath = (folder / materials[i].specular_texname).string();
 			//else if (!materials[i].bump_texname.empty())
 			//{
 			//	// CryEngine sponza scene uses keyword "bump" to store normal
@@ -147,29 +147,20 @@ namespace
 			//}
 		}
 
-		std::vector<std::unordered_map<util::Vertex, uint32_t>> uniqueVerticesPerMaterialGroup(materials.size() + 1);
 
-		auto appendVertex = [&uniqueVerticesPerMaterialGroup, &materialGroups](const util::Vertex& vertex, int materialId)
-		{
-			// 0 for unknown material
-			auto& uniqueVertices = uniqueVerticesPerMaterialGroup[materialId + 1];
-			auto& group = materialGroups[materialId + 1];
-			if (uniqueVertices.count(vertex) == 0)
-			{
-				uniqueVertices[vertex] = group.vertices.size(); // auto incrementing size
-				group.vertices.push_back(vertex);
-			}
-			group.indices.emplace_back(uniqueVertices[vertex]);
-		};
+
+		std::vector<std::vector<util::Vertex>> verticesMap(materials.size() + 1);
 
 		for (const auto& shape : shapes)
 		{
 			size_t indexOffset = 0;
+
 			for (size_t n = 0; n < shape.mesh.num_face_vertices.size(); n++)
 			{
-				// per face
+				// 0 for undefinde material (tinyObj loader uses -1 for undefined)
+				auto& vertices = verticesMap[shape.mesh.material_ids[n] + 1]; 
 				auto ngon = shape.mesh.num_face_vertices[n];
-				auto materialID = shape.mesh.material_ids[n];
+
 				for (size_t f = 0; f < ngon; f++)
 				{
 					const auto& index = shape.mesh.indices[indexOffset + f];
@@ -202,10 +193,46 @@ namespace
 						attrib.normals[3 * index.normal_index + 2]
 					};
 					
-					appendVertex(vertex, materialID);
-
+					vertices.emplace_back(vertex);
 				}
+
+				// count tangent vector
+				glm::vec3 tangent(0.0f);
+				auto edge1 = vertices[1].pos - vertices[0].pos;
+				auto edge2 = vertices[2].pos - vertices[0].pos;
+				auto dtUV1 = vertices[1].texCoord - vertices[0].texCoord;
+				auto dtUV2 = vertices[2].texCoord - vertices[0].texCoord;
+
+				float f = 1.0f / (dtUV1.x * dtUV2.y - dtUV2.x * dtUV1.y);
+
+				tangent.x = f * (dtUV2.y * edge1.x - dtUV1.y * edge2.x);
+				tangent.y = f * (dtUV2.y * edge1.y - dtUV1.y * edge2.y);
+				tangent.z = f * (dtUV2.y * edge1.z - dtUV1.y * edge2.z);
+				tangent = glm::normalize(tangent);
+
+				for (size_t i = vertices.size() - ngon; i < vertices.size(); i++)
+					vertices[i].tangent += tangent;
+
 				indexOffset += ngon;
+			}
+		}
+
+		std::vector<std::unordered_map<util::Vertex, uint32_t>> uniqueVerticesPerMaterialGroup(materials.size() + 1);
+		
+		for (size_t materialID = 0; materialID < verticesMap.size(); materialID++)
+		{
+			auto& uniqueVertices = uniqueVerticesPerMaterialGroup[materialID];
+			auto& group = materialGroups[materialID];
+
+			for (auto& vertex : verticesMap[materialID])
+			{
+				if (uniqueVertices.count(vertex) == 0)
+				{
+					vertex.tangent = glm::normalize(vertex.tangent);
+					uniqueVertices[vertex] = group.vertices.size(); // auto incrementing size
+					group.vertices.push_back(vertex);
+				}
+				group.indices.emplace_back(uniqueVertices[vertex]);
 			}
 		}
 

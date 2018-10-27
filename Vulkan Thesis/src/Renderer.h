@@ -19,6 +19,8 @@ public:
 
 	void setCamera(const glm::mat4& view, const glm::vec3 campos);
 
+	void reloadShaders();
+
 private:
 	void recreateSwapChain();
 
@@ -51,8 +53,6 @@ private:
 	void updateUniformBuffers();
 	void drawFrame();
 
-	vk::UniqueShaderModule createShaderModule(const std::string& filename);
-
 private:
 	Context mContext;
 	Utility mUtility;
@@ -68,10 +68,13 @@ private:
 
 	vk::UniquePipelineCache mPipelineCache;
 
+	// command buffers
 	std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
 	vk::UniqueCommandBuffer mLightCullingCommandBuffer;
 	vk::UniqueCommandBuffer mGBufferCommandBuffer;
+	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffer;
 
+	// semaphores // TODO move to resource handler
 	vk::UniqueSemaphore mImageAvailableSemaphore;
 	vk::UniqueSemaphore mGBufferFinishedSemaphore;
 	vk::UniqueSemaphore mLightCullingFinishedSemaphore;
@@ -83,7 +86,6 @@ private:
 	vk::UniqueFramebuffer mGBufferFramebuffer;
 
 	// composition
-	ImageParameters mDepthImage;
 	vk::UniqueRenderPass mCompositionRenderpass;
 	std::vector<vk::UniqueFramebuffer> mSwapchainFramebuffers;
 
@@ -92,6 +94,8 @@ private:
 	BufferParameters mObjectUniformBuffer;
 	BufferParameters mCameraStagingBuffer;
 	BufferParameters mCameraUniformBuffer;
+	
+	BufferParameters mDebugUniformBuffer;
 
 	// TODO refactor
 	BufferParameters mLightsOutBuffer;

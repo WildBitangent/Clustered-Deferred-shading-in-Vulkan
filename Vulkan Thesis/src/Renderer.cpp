@@ -5,6 +5,7 @@
 
 #include "Context.h"
 #include "Model.h"
+#include "BaseApp.h"
 
 constexpr auto WIDTH = 1024;
 constexpr auto HEIGHT = 726;
@@ -25,6 +26,11 @@ struct CameraUBO
 struct ObjectUBO
 {
 	glm::mat4 model;
+};
+
+struct DebugUBO
+{
+	uint32_t debugState = 0;
 };
 
 struct PointLight
@@ -89,6 +95,16 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
 		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
 	}
+}
+
+void Renderer::reloadShaders()
+{
+	vkDeviceWaitIdle(mContext.getDevice());
+
+	createGraphicsPipelines();
+	createGraphicsCommandBuffers();
+	createComputePipeline();
+	createComputeCommandBuffer();
 }
 
 void Renderer::recreateSwapChain()
@@ -536,6 +552,21 @@ void Renderer::createDescriptorSetLayouts()
 
 		mResource.descriptorSetLayout.add("composition", createInfo);
 	}
+
+	// Debug 
+	{
+		vk::DescriptorSetLayoutBinding uboBinding;
+		uboBinding.binding = 0;
+		uboBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+		uboBinding.descriptorCount = 1;
+		uboBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+		vk::DescriptorSetLayoutCreateInfo createInfo;
+		createInfo.bindingCount = 1;
+		createInfo.pBindings = &uboBinding;
+
+		mResource.descriptorSetLayout.add("debug", createInfo);
+	}
 }
 
 void Renderer::createPipelineCache()
@@ -601,17 +632,17 @@ void Renderer::createGraphicsPipelines()
 		inputAssemblyInfo.primitiveRestartEnable = VK_FALSE;
 
 		// shader stages
-		auto vertShader = createShaderModule("data/composite.vert");
-		auto fragShader = createShaderModule("data/composite.frag");
+		auto vertShader = mResource.shaderModule.add("data/composite.vert");
+		auto fragShader = mResource.shaderModule.add("data/composite.frag");
 
 		vk::PipelineShaderStageCreateInfo vertexStageInfo;
 		vertexStageInfo.stage = vk::ShaderStageFlagBits::eVertex;
-		vertexStageInfo.module = *vertShader;
+		vertexStageInfo.module = vertShader;
 		vertexStageInfo.pName = "main";
 
 		vk::PipelineShaderStageCreateInfo fragmentStageInfo;
 		fragmentStageInfo.stage = vk::ShaderStageFlagBits::eFragment;
-		fragmentStageInfo.module = *fragShader;
+		fragmentStageInfo.module = fragShader;
 		fragmentStageInfo.pName = "main";
 
 		vk::PipelineShaderStageCreateInfo shaderStages[] = { vertexStageInfo, fragmentStageInfo };
@@ -664,19 +695,83 @@ void Renderer::createGraphicsPipelines()
 		mResource.pipeline.add("composition", *mPipelineCache, pipelineInfo);
 	}
 
-	// create G buffer construction pipeline
+	// debug pipeline
 	{
-		auto vertShader = createShaderModule("data/gbuffers.vert");
-		auto fragShader = createShaderModule("data/gbuffers.frag");
+		vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo;
+		inputAssemblyInfo.topology = vk::PrimitiveTopology::eTriangleStrip;
+		inputAssemblyInfo.primitiveRestartEnable = VK_FALSE;
+
+		// shader stages
+		auto vertShader = mResource.shaderModule.add("data/debug.vert");
+		auto fragShader = mResource.shaderModule.add("data/debug.frag");
 
 		vk::PipelineShaderStageCreateInfo vertexStageInfo;
 		vertexStageInfo.stage = vk::ShaderStageFlagBits::eVertex;
-		vertexStageInfo.module = *vertShader;
+		vertexStageInfo.module = vertShader;
 		vertexStageInfo.pName = "main";
 
 		vk::PipelineShaderStageCreateInfo fragmentStageInfo;
 		fragmentStageInfo.stage = vk::ShaderStageFlagBits::eFragment;
-		fragmentStageInfo.module = *fragShader;
+		fragmentStageInfo.module = fragShader;
+		fragmentStageInfo.pName = "main";
+
+		vk::PipelineShaderStageCreateInfo shaderStages[] = { vertexStageInfo, fragmentStageInfo };
+
+		// vertex data info
+		vk::PipelineVertexInputStateCreateInfo vertexInputInfo; // empty - positions will be created in VS
+
+		// depth and stencil
+		vk::PipelineDepthStencilStateCreateInfo depthStencil;
+
+		// blending
+		vk::PipelineColorBlendStateCreateInfo blendingInfo;
+		blendingInfo.attachmentCount = 1;
+		blendingInfo.pAttachments = &colorblendAttachment;
+
+		std::vector<vk::DescriptorSetLayout> setLayouts = {
+			mResource.descriptorSetLayout.get("debug"),
+			mResource.descriptorSetLayout.get("composition"),
+		};
+
+		vk::PipelineLayoutCreateInfo layoutInfo;
+		layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
+		layoutInfo.pSetLayouts = setLayouts.data();
+
+		auto layout = mResource.pipelineLayout.add("debug", layoutInfo);
+
+		vk::GraphicsPipelineCreateInfo pipelineInfo;
+		pipelineInfo.flags = vk::PipelineCreateFlagBits::eDerivative;
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = shaderStages;
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssemblyInfo;
+		pipelineInfo.pViewportState = &viewportInfo;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = &depthStencil;
+		pipelineInfo.pColorBlendState = &blendingInfo;
+		pipelineInfo.layout = layout;
+		pipelineInfo.renderPass = *mCompositionRenderpass;
+		pipelineInfo.subpass = 0;
+		pipelineInfo.basePipelineHandle = mResource.pipeline.get("composition"); // derive from composition pipeline
+		pipelineInfo.basePipelineIndex = -1;
+
+		mResource.pipeline.add("debug", *mPipelineCache, pipelineInfo);
+	}
+
+	// create G buffer construction pipeline
+	{
+		auto vertShader = mResource.shaderModule.add("data/gbuffers.vert");
+		auto fragShader = mResource.shaderModule.add("data/gbuffers.frag");
+
+		vk::PipelineShaderStageCreateInfo vertexStageInfo;
+		vertexStageInfo.stage = vk::ShaderStageFlagBits::eVertex;
+		vertexStageInfo.module = vertShader;
+		vertexStageInfo.pName = "main";
+
+		vk::PipelineShaderStageCreateInfo fragmentStageInfo;
+		fragmentStageInfo.stage = vk::ShaderStageFlagBits::eFragment;
+		fragmentStageInfo.module = fragShader;
 		fragmentStageInfo.pName = "main";
 
 		vk::PipelineShaderStageCreateInfo shaderStages[] = { vertexStageInfo, fragmentStageInfo };
@@ -903,6 +998,15 @@ void Renderer::createUniformBuffers()
 			vk::MemoryPropertyFlagBits::eDeviceLocal
 		);
 	}
+
+	// debug
+	{
+		mDebugUniformBuffer = mUtility.createBuffer(
+			sizeof(DebugUBO),
+			vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached
+		);
+	}
 }
 
 void Renderer::createLights()
@@ -1121,6 +1225,30 @@ void Renderer::createDescriptorSets()
 		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 	}
 
+	// debug
+	{
+		vk::DescriptorSetAllocateInfo allocInfo;
+		allocInfo.descriptorPool = *mDescriptorPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("debug");
+
+		auto targetSet = mResource.descriptorSet.add("debug", allocInfo);
+
+		vk::DescriptorBufferInfo uboInfo;
+		uboInfo.buffer = *mDebugUniformBuffer.handle;
+		uboInfo.offset = 0;
+		uboInfo.range = mDebugUniformBuffer.size;
+
+		vk::WriteDescriptorSet write;
+		write.dstSet = targetSet;
+		write.descriptorCount = 1;
+		write.dstBinding = 0;
+		write.descriptorType = vk::DescriptorType::eUniformBuffer;
+		write.pBufferInfo = &uboInfo;
+		
+		descriptorWrites.emplace_back(write);
+	}
+
 	mContext.getDevice().updateDescriptorSets(descriptorWrites, nullptr);
 }
 
@@ -1200,9 +1328,8 @@ void Renderer::createGraphicsCommandBuffers()
 			renderpassInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
 			renderpassInfo.renderArea.extent = mSwapchainExtent;
 
-			std::array<vk::ClearValue, 2> clearValues;
+			std::array<vk::ClearValue, 1> clearValues;
 			clearValues[0].color.setFloat32({ 1.0f, 0.8f, 0.4f, 1.0f });
-			clearValues[1].depthStencil.setDepth(1.0f).setStencil(0.0f);
 
 			renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 			renderpassInfo.pClearValues = clearValues.data();
@@ -1219,6 +1346,49 @@ void Renderer::createGraphicsCommandBuffers()
 			};
 
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("composition"), 0, descriptorSets, nullptr);
+			cmd.draw(4, 1, 0, 0);
+
+			cmd.endRenderPass();
+			cmd.end();
+		}
+	}
+
+	// debug
+	{
+		vk::CommandBufferAllocateInfo allocInfo;
+		allocInfo.commandPool = mContext.getGraphicsCommandPool();
+		allocInfo.level = vk::CommandBufferLevel::ePrimary;
+		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
+
+		mDebugCommandBuffer = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+
+		// record command buffers
+		for (size_t i = 0; i < mDebugCommandBuffer.size(); i++)
+		{
+			vk::RenderPassBeginInfo renderpassInfo;
+			renderpassInfo.renderPass = *mCompositionRenderpass;
+			renderpassInfo.framebuffer = *mSwapchainFramebuffers[i];
+			renderpassInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
+			renderpassInfo.renderArea.extent = mSwapchainExtent;
+
+			std::array<vk::ClearValue, 1> clearValues;
+			clearValues[0].color.setFloat32({ 1.0f, 0.8f, 0.4f, 1.0f });
+
+			renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+			renderpassInfo.pClearValues = clearValues.data();
+
+			auto& cmd = *mDebugCommandBuffer[i];
+
+			cmd.begin(vk::CommandBufferBeginInfo{});
+			cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("debug"));
+
+			std::array<vk::DescriptorSet, 2> descriptorSets = {
+				mResource.descriptorSet.get("debug"),
+				mResource.descriptorSet.get("composition"),
+			};
+
+			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("debug"), 0, descriptorSets, nullptr);
 			cmd.draw(4, 1, 0, 0);
 
 			cmd.endRenderPass();
@@ -1257,11 +1427,11 @@ void Renderer::createComputePipeline()
 
 	mResource.pipelineLayout.add("lightculling", layoutInfo);
 
-	auto shader = createShaderModule("data/lightculling.comp");
+	auto shader = mResource.shaderModule.add("data/lightculling.comp");
 
 	vk::PipelineShaderStageCreateInfo stageInfo;
 	stageInfo.stage = vk::ShaderStageFlagBits::eCompute;
-	stageInfo.module = *shader;
+	stageInfo.module = shader;
 	stageInfo.pName = "main";
 
 	vk::ComputePipelineCreateInfo pipelineInfo;
@@ -1366,6 +1536,22 @@ void Renderer::updateUniformBuffers()
 	// 	mContext.getDevice().unmapMemory(*mObjectStagingBuffer.memory);
 	// 	mUtility.copyBuffer(*mObjectStagingBuffer.handle, *mObjectUniformBuffer.handle, sizeof(ObjectUBO));
 	// }
+
+	// update debug buffer, if dirty bit is set
+	if (BaseApp::getInstance().getUI().debugStateUniformNeedsUpdate())
+	{
+		auto state = static_cast<uint32_t>(BaseApp::getInstance().getUI().getDebugIndex());
+		auto data = reinterpret_cast<DebugUBO*>(mContext.getDevice().mapMemory(*mDebugUniformBuffer.memory, 0, sizeof(DebugUBO)));
+
+		data->debugState = state;
+
+		vk::MappedMemoryRange range;
+		range.size = sizeof(DebugUBO);
+		range.memory = *mDebugUniformBuffer.memory;
+
+		mContext.getDevice().unmapMemory(*mDebugUniformBuffer.memory);
+		mContext.getDevice().flushMappedMemoryRanges(range);
+	}
 }
 
 void Renderer::drawFrame()
@@ -1409,32 +1595,52 @@ void Renderer::drawFrame()
 	}
 	// TODO: use Fence and we can have cpu start working at a earlier time
 
-	// submit light culling
+
+	if (BaseApp::getInstance().getUI().getDebugIndex() == DebugStates::disabled)
 	{
-		vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eComputeShader;
+		// submit light culling
+		{
+			vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eComputeShader;
+
+			vk::SubmitInfo submitInfo;
+			submitInfo.waitSemaphoreCount = 1;
+			submitInfo.pWaitSemaphores = &(*mGBufferFinishedSemaphore);
+			submitInfo.pWaitDstStageMask = &waitStages;
+			submitInfo.commandBufferCount = 1;
+			submitInfo.pCommandBuffers = &*mLightCullingCommandBuffer;
+			submitInfo.signalSemaphoreCount = 1;
+			submitInfo.pSignalSemaphores = &(*mLightCullingFinishedSemaphore);
+
+			mContext.getComputeQueue().submit(submitInfo, nullptr); // TODO compute queue in graphics queue
+		}
+
+		// submit composition
+		{
+			vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eFragmentShader;
+
+			vk::SubmitInfo submitInfo;
+			submitInfo.waitSemaphoreCount = 1;
+			submitInfo.pWaitSemaphores = &(*mLightCullingFinishedSemaphore);
+			submitInfo.pWaitDstStageMask = &waitStages;
+			submitInfo.commandBufferCount = 1;
+			submitInfo.pCommandBuffers = &*mCommandBuffers[imageIndex];
+			submitInfo.signalSemaphoreCount = 1;
+			submitInfo.pSignalSemaphores = &(*mRenderFinishedSemaphore);
+
+			submitInfos.emplace_back(submitInfo);
+		}
+	}
+	else
+	{
+		// debugging
+		vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eFragmentShader;
 
 		vk::SubmitInfo submitInfo;
 		submitInfo.waitSemaphoreCount = 1;
 		submitInfo.pWaitSemaphores = &(*mGBufferFinishedSemaphore);
 		submitInfo.pWaitDstStageMask = &waitStages;
 		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &*mLightCullingCommandBuffer;
-		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &(*mLightCullingFinishedSemaphore);
-
-		mContext.getComputeQueue().submit(submitInfo, nullptr);
-	}
-
-	// submit composition
-	{
-		vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eFragmentShader;
-
-		vk::SubmitInfo submitInfo;
-		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &(*mLightCullingFinishedSemaphore);
-		submitInfo.pWaitDstStageMask = &waitStages;
-		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &*mCommandBuffers[imageIndex];
+		submitInfo.pCommandBuffers = &*mDebugCommandBuffer[imageIndex];
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = &(*mRenderFinishedSemaphore);
 
@@ -1442,6 +1648,8 @@ void Renderer::drawFrame()
 	}
 
 	mContext.getGraphicsQueue().submit(submitInfos, nullptr);
+
+
 
 	// 3. Submitting the result back to the swap chain to show it on screen
 	{
@@ -1459,15 +1667,4 @@ void Renderer::drawFrame()
 		else if (presentResult != vk::Result::eSuccess)
 			throw std::runtime_error("Failed to present swap chain image");
 	}
-}
-
-vk::UniqueShaderModule Renderer::createShaderModule(const std::string& filename)
-{
-	auto spirv = util::compileShader(filename);
-
-	vk::ShaderModuleCreateInfo shaderInfo;
-	shaderInfo.codeSize = spirv.size() * sizeof(uint32_t);
-	shaderInfo.pCode = spirv.data();
-
-	return mContext.getDevice().createShaderModuleUnique(shaderInfo);
 }

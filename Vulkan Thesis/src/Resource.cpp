@@ -1,4 +1,6 @@
 ﻿#include "Resource.h"
+#include "Model.h"
+#include <iostream>
 
 using namespace resource;
 
@@ -27,11 +29,32 @@ vk::DescriptorSet DescriptorSet::add(const std::string& key, vk::DescriptorSetAl
 	return *mData.insert_or_assign(key, std::move(mDevice.allocateDescriptorSetsUnique(allocInfo)[0])).first->second;
 }
 
+vk::ShaderModule ShaderModule::add(const std::string& key)
+{
+	try // TODO must done with own exception type
+	{
+		auto spirv = util::compileShader(key);
+
+		vk::ShaderModuleCreateInfo shaderInfo;
+		shaderInfo.codeSize = spirv.size() * sizeof(uint32_t);
+		shaderInfo.pCode = spirv.data();
+
+		mData.insert_or_assign(key, mDevice.createShaderModuleUnique(shaderInfo));
+	}
+	catch (std::runtime_error& err)
+	{
+		std::cout << err.what() << std::endl;
+	}
+
+	return *mData[key];
+}
+
 Resources::Resources(const vk::Device device)
 	: pipelineLayout(device)
 	, pipeline(device)
 	, descriptorSetLayout(device)
 	, descriptorSet(device)
+	, shaderModule(device)
 {
 }
 

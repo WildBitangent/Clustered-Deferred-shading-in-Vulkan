@@ -16,6 +16,8 @@ layout(location = 0) in vec3 worldPos;
 layout(location = 1) in vec2 texCoord;
 layout(location = 2) in vec3 color;
 layout(location = 3) in vec3 normal;
+layout(location = 4) in vec3 tangent;
+layout(location = 5) in vec3 bitangent;
 
 layout(location = 0) out vec3 outPosition;
 layout(location = 1) out vec4 outColor;
@@ -35,8 +37,10 @@ void main()
 	if (material.hasSpecularMap > 0)
 		specular = texture(specularSampler, texCoord).r;
 
-	if (material.hasNormalMap > 0)
-		outNormal = vec4(texture(normalSampler, texCoord).rgb, specular);
-	else
-		outNormal = vec4(vec3(1.0), specular);
+	vec3 normalTex = (material.hasNormalMap > 0) ? texture(normalSampler, texCoord).xyz : vec3(0.5, 0.5, 1.0);
+
+	mat3 TBN = mat3(tangent, bitangent, normal);
+	vec3 onorm = TBN * normalize(normalTex * 2.0 - 1.0);
+
+	outNormal = vec4(onorm, specular);
 }

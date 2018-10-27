@@ -61,11 +61,11 @@ vk::VertexInputBindingDescription util::getVertexBindingDesciption()
 	return bindingDescription;
 }
 
-std::array<vk::VertexInputAttributeDescription, 4> util::getVertexAttributeDescriptions()
+std::array<vk::VertexInputAttributeDescription, 5> util::getVertexAttributeDescriptions()
 {
 	using util::Vertex;
 	
-	std::array<vk::VertexInputAttributeDescription, 4> descriptions;
+	std::array<vk::VertexInputAttributeDescription, 5> descriptions;
 	descriptions[0].binding = 0;
 	descriptions[0].location = 0;
 	descriptions[0].format = vk::Format::eR32G32B32Sfloat;
@@ -82,6 +82,10 @@ std::array<vk::VertexInputAttributeDescription, 4> util::getVertexAttributeDescr
 	descriptions[3].location = 3;
 	descriptions[3].format = vk::Format::eR32G32B32Sfloat;
 	descriptions[3].offset = offsetof(Vertex, normal);
+	descriptions[4].binding = 0;
+	descriptions[4].location = 4;
+	descriptions[4].format = vk::Format::eR32G32B32Sfloat;
+	descriptions[4].offset = offsetof(Vertex, tangent);
 
 	return descriptions;
 }
@@ -145,6 +149,16 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	glslang::GlslangToSpv(*program.getIntermediate(shaderType), spirV, &logger, &spvOptions);
 
 	return spirV;
+}
+
+size_t util::Vertex::hash() const
+{
+	size_t seed = 0;
+	seed ^= std::hash<glm::vec3>()(pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+	seed ^= std::hash<glm::vec3>()(color) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+	seed ^= std::hash<glm::vec2>()(texCoord) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+	seed ^= std::hash<glm::vec3>()(normal) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+	return seed;
 }
 
 Utility::Utility(const Context& context)
@@ -310,7 +324,7 @@ ImageParameters Utility::loadImageFromFile(std::string path)
 	std::vector<unsigned char> pixels;
 
 	if (lodepng::decode(pixels, width, height, path))
-		throw std::runtime_error("Failed to load png file");
+		throw std::runtime_error("Failed to load png file: " + path);
 
 	// create staging image memory
 	auto stagingBuffer = createBuffer(

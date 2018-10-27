@@ -34,7 +34,7 @@ struct GBuffer
 namespace util
 {
 	vk::VertexInputBindingDescription getVertexBindingDesciption();
-	std::array<vk::VertexInputAttributeDescription, 4> getVertexAttributeDescriptions();
+	std::array<vk::VertexInputAttributeDescription, 5> getVertexAttributeDescriptions();
 	std::vector<uint32_t> compileShader(const std::string& filename);
 
 	struct Vertex
@@ -43,21 +43,14 @@ namespace util
 		glm::vec3 color;
 		glm::vec2 texCoord;
 		glm::vec3 normal;
+		glm::vec3 tangent = glm::vec3(0.0f);
 
 		bool operator==(const Vertex& o) const noexcept
 		{
 			return pos == o.pos && color == o.color && texCoord == o.texCoord && normal == o.normal;
 		}
 
-		size_t hash() const
-		{
-			size_t seed = 0;
-			seed ^= std::hash<glm::vec3>()(pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-			seed ^= std::hash<glm::vec3>()(color) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-			seed ^= std::hash<glm::vec2>()(texCoord) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-			seed ^= std::hash<glm::vec3>()(normal) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-			return seed;
-		}
+		size_t hash() const;
 	};
 
 	inline bool isNearlyEqual(float a, float b, float tolerance = 1e-8f)

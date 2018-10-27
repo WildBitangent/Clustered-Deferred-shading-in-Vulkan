@@ -7,6 +7,7 @@
 #include <chrono>
 
 #include "Util.h"
+#include <iostream>
 
 
 BaseApp& BaseApp::getInstance()
@@ -32,12 +33,30 @@ void BaseApp::run()
 		{
 			tick(deltaTime);
 			startTime = current;
-		}
+			static size_t counter = 0;
 
-		mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
-		mRenderer.requestDraw(1.f);
-		mRenderer.cleanUp();		
+			// if (counter++ % 60 == 0)
+			// 	std::cout 
+			// 		<< mCamera.position.x << " " << mCamera.position.y << " " << mCamera.position.z << " : " 
+			// 		<< mCamera.rotation.w << " " << mCamera.rotation.x << " " << mCamera.rotation.y << " " << mCamera.rotation.z 
+			// 		<< std::endl;
+
+			mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
+			mRenderer.requestDraw(1.f);
+			mRenderer.cleanUp();
+		}
+		
 	}
+}
+
+UI& BaseApp::getUI()
+{
+	return mUI;
+}
+
+Renderer& BaseApp::getRenderer()
+{
+	return mRenderer;
 }
 
 BaseApp::BaseApp()
@@ -175,6 +194,8 @@ void BaseApp::onKeyPress(int key, int scancode, int action, int mods)
 			break;
 		}
 	}
+
+	mUI.onKeyPress(key, action);
 }
 
 void BaseApp::onCursorPosChange(double xPos, double yPos)

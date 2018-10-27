@@ -61,6 +61,14 @@ namespace resource
 		vk::DescriptorSet add(const std::string& key, vk::DescriptorSetAllocateInfo allocInfo);
 	};
 
+	class ShaderModule : public Base<vk::UniqueShaderModule, vk::ShaderModule>
+	{
+	public:
+		explicit ShaderModule(const vk::Device device) : Base(device) {}
+
+		vk::ShaderModule add(const std::string& key);
+	};
+
 	struct Resources
 	{
 		explicit Resources(const vk::Device device);
@@ -69,6 +77,7 @@ namespace resource
 		Pipeline pipeline;
 		DescriptorSetLayout descriptorSetLayout;
 		DescriptorSet descriptorSet;
+		ShaderModule shaderModule;
 	};
 }
 

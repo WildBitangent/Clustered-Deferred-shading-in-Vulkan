@@ -31,25 +31,28 @@ void main()
 	vec3 fragPos = texture(samplerposition, inUV).rgb;
 	vec4 albedo = texture(samplerAlbedo, inUV);
 	vec3 normal = texture(samplerNormal, inUV).rgb;
-	float specular = texture(samplerNormal, inUV).a;
+	float specStrength = texture(samplerNormal, inUV).a;
 	
 	#define ambient 0.3
+	vec3 lightDir = vec3(0.7, 0.7, 0.6);
+	// vec3 lightDir = normalize(vec3(camera.view[0][2], camera.view[1][2], camera.view[2][2]));
+	vec3 camPos = -vec3(camera.view[0][3], camera.view[1][3], camera.view[2][3]);
 	
 	// Ambient part
 	vec3 fragcolor = albedo.rgb * ambient;
-	
 
-	vec3 light = vec3(0.7);
 
-	// // Diffuse part
-	// vec3 diff = albedo.rgb * max(0.0, dot(normal, light));
-	// fragcolor += diff;
+	// Diffuse part
+	vec3 diff = albedo.rgb * max(0.0, dot(normal, lightDir));
+	fragcolor += diff;
 
-	// // Specular part
-	// vec3 R = reflect(-light, normal);
-	// float NdotR = max(0.0, dot(R, V));
-	// vec3 spec = albedo.a * pow(NdotR, 16.0) * atten;
+	// Specular part
+	vec3 viewDir = normalize(camPos - fragPos);
+	vec3 reflectDir = reflect(-lightDir, normal);
 
+	float spec = max(0.0, dot(viewDir, reflectDir));
+	vec3 specular = vec3(specStrength * pow(spec, 16.0));
+	fragcolor += specular;
    
  	outFragcolor = vec4(fragcolor, 1.0);	
 }

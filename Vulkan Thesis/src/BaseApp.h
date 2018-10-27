@@ -1,13 +1,14 @@
 #pragma once
 #include "Context.h"
 #include "Renderer.h"
+#include "UI.h"
 
 #include <glm/gtx/quaternion.hpp>
 
 struct Camera
 {
-	glm::vec3 position = { 1.5f, 1.5f, 1.5f };
-	glm::quat rotation = { 1.0f, 0.0f, 0.0f, 0.0f };
+	glm::vec3 position = { 13.0f, 1.5f, -0.45f };
+	glm::quat rotation = { 0.68f, 0.0f, 0.72f, 0.0f };
 	float rotationSpeed = glm::pi<float>();
 	float moveSpeed = 10.f;
 
@@ -26,6 +27,8 @@ public:
 	static BaseApp& getInstance();
 
 	void run();
+	UI& getUI();
+	Renderer& getRenderer();
 
 private:
 	BaseApp();
@@ -54,4 +57,5 @@ private:
 private:
 	GLFWwindow* mWindow = createWindow();
 	Renderer mRenderer;
+	UI mUI;
 };
