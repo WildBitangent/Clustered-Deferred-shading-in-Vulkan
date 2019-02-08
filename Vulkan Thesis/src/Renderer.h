@@ -7,17 +7,20 @@
 #include "Resource.h"
 
 struct GLFWwindow;
+struct PointLight;
 
 class Renderer
 {
 public:
 	Renderer(GLFWwindow* window);
+	// ~Renderer();
 
 	//void resize(int width, int height);
 	void requestDraw(float deltatime);
 	void cleanUp();
 
 	void setCamera(const glm::mat4& view, const glm::vec3 campos);
+	void updateLights(const std::vector<PointLight>& lights); 
 
 	void reloadShaders();
 
@@ -31,24 +34,15 @@ private:
 	void createPipelineCache();
 	void createGraphicsPipelines();
 	void createGBuffers();
-	// void createFrameBuffers();
-	// void createTextureSampler();
 	void createUniformBuffers();
 	void createLights();
 	void createDescriptorPool();
-	// void createSceneObjectDescriptorSet();
 	void createDescriptorSets();
-	//void createIntermediateDescriptorSet();
-	//void updateIntermediateDescriptorSet();
 	void createGraphicsCommandBuffers();
-	void createSemaphores();
+	void createSyncPrimitives();
 
 	void createComputePipeline();
-	//void createLigutCullingDescriptorSet();
-	//void createLightVisibilityBuffer();
 	void createComputeCommandBuffer();
-
-	//void createDepthPrePassCommandBuffer();
 
 	void updateUniformBuffers();
 	void drawFrame();
@@ -63,22 +57,28 @@ private:
 	vk::UniqueSwapchainKHR mSwapchain;
 	std::vector<vk::Image> mSwapchainImages;
 	std::vector<vk::UniqueImageView> mSwapchainImageViews;
+
 	vk::Format mSwapchainImageFormat;
 	vk::Extent2D mSwapchainExtent;
+	size_t mCurrentFrame = 0;
 
 	vk::UniquePipelineCache mPipelineCache;
 
 	// command buffers
-	std::vector<vk::UniqueCommandBuffer> mCommandBuffers;
+	std::vector<vk::UniqueCommandBuffer> mPrimaryCompositionCommandBuffers;
+	std::vector<vk::UniqueCommandBuffer> mCompositionCommandBuffers;
 	vk::UniqueCommandBuffer mLightCullingCommandBuffer;
 	vk::UniqueCommandBuffer mGBufferCommandBuffer;
-	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffer;
+	std::vector<vk::UniqueCommandBuffer> mPrimaryDebugCommandBuffers;
+	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffers;
 
 	// semaphores // TODO move to resource handler
-	vk::UniqueSemaphore mImageAvailableSemaphore;
+	std::vector<vk::UniqueSemaphore> mImageAvailableSemaphore; // todo alloc
 	vk::UniqueSemaphore mGBufferFinishedSemaphore;
 	vk::UniqueSemaphore mLightCullingFinishedSemaphore;
-	vk::UniqueSemaphore mRenderFinishedSemaphore;
+	std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphore; // todo
+
+	std::vector<vk::UniqueFence> mFences;
 
 	// G Buffer
 	GBuffer mGBufferAttachments;
@@ -102,5 +102,7 @@ private:
 
 	BufferParameters mPointLightsStagingBuffer;
 	BufferParameters mPointLightsBuffer;
+
+	friend class UI;
 };
 

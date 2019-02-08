@@ -83,6 +83,7 @@ public:
 	vk::UniqueImageView createImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags flags);
 
 	ImageParameters loadImageFromFile(std::string path);
+	ImageParameters loadImageFromMemory(std::vector<uint8_t> pixels, size_t width, size_t height);
 
 	vk::CommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(vk::CommandBuffer buffer);

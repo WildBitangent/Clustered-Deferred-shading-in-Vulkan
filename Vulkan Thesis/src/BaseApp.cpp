@@ -7,7 +7,8 @@
 #include <chrono>
 
 #include "Util.h"
-#include <iostream>
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
 
 
 BaseApp& BaseApp::getInstance()
@@ -33,20 +34,30 @@ void BaseApp::run()
 		{
 			tick(deltaTime);
 			startTime = current;
-			static size_t counter = 0;
 
-			// if (counter++ % 60 == 0)
-			// 	std::cout 
-			// 		<< mCamera.position.x << " " << mCamera.position.y << " " << mCamera.position.z << " : " 
-			// 		<< mCamera.rotation.w << " " << mCamera.rotation.x << " " << mCamera.rotation.y << " " << mCamera.rotation.z 
-			// 		<< std::endl;
+
+			ImGui_ImplGlfw_NewFrame();
+			ImGui::NewFrame();
+
+			mUI.update();
+
+			ImGui::Render();
+			mUI.recordCommandBuffer();
 
 			mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
+			mRenderer.updateLights(mLights);
 			mRenderer.requestDraw(1.f);
-			mRenderer.cleanUp();
+			// mRenderer.cleanUp();
 		}
+		// else
+		// {
+		// 	mRenderer.requestDraw(1.f);
+		// 	mRenderer.cleanUp();
+		// }
 		
 	}
+
+	mRenderer.cleanUp();
 }
 
 UI& BaseApp::getUI()
@@ -61,8 +72,27 @@ Renderer& BaseApp::getRenderer()
 
 BaseApp::BaseApp()
 	: mRenderer(mWindow)
+	, mUI(mWindow, mRenderer)
 {
-	
+	mLights.reserve(50'000); // todo refactor for max tile lights
+	mLightsDirections.reserve(50'000);
+
+	// create lights
+	for (size_t i = 0; i < 50'000; i++)
+	{
+		mLights.emplace_back(PointLight{
+			{ 11.0f - i * 3, 1.5, -0.4 },
+			// { 11.0f, 1.5, -0.4 },
+			2.0f,
+			{ 1.0f, 1.0f, 1.0f/* - i * 0.2f*/ },
+			0.0f,
+		});
+
+		mLightsDirections.emplace_back(glm::normalize(glm::vec3(rand(), abs(rand()), rand())));
+		mSpeeds.emplace_back((1 + (rand() % 10)) / 10.0f);
+	}
+
+	mLights[0].position = { 11.2854, -0.064, 0.0834 };
 }
 
 GLFWwindow* BaseApp::createWindow()
@@ -99,6 +129,28 @@ GLFWwindow* BaseApp::createWindow()
 
 void BaseApp::tick(float dt)
 {
+	auto randVec3 = []()
+	{
+		return glm::normalize(glm::vec3(rand() - RAND_MAX / 2, rand() - RAND_MAX / 2, rand() - RAND_MAX / 2));
+	};
+
+	if (mUI.mContext.lightsAnimation)
+	{
+		for (size_t i = 1; i < mUI.mContext.lightsCount; i++)
+		{
+			if (glm::length(mLights[i].position) > 25)
+			{
+				mLightsDirections[i] = randVec3();
+				mLights[i].intensity = glm::abs(randVec3());
+				mLights[i].position = randVec3() * glm::vec3(20, 0, 20);
+				mSpeeds[i] = (1 + (rand() % 100)) / 200.0f;
+			}
+
+			mLights[i].position += mLightsDirections[i] * mSpeeds[i];
+		}
+	}
+
+
 	if (mRMBDown)
 	{
 		auto cursorDelta = (mCursorPos - mPrevCursorPos) / glm::vec2(glm::min(1024, 726) * 2.0f);
@@ -115,16 +167,37 @@ void BaseApp::tick(float dt)
 	}
 
 	if (mWDown)
-		mCamera.position += mCamera.rotation  * glm::vec3(0.0f, 0.0f, -1.0f) * mCamera.moveSpeed * dt;
+		mCamera.position += mCamera.rotation * glm::vec3(0.0f, 0.0f, -1.0f) * mCamera.moveSpeed * dt;
 
 	if (mSDown)
-		mCamera.position -= mCamera.rotation  * glm::vec3(0.0f, 0.0f, -1.0f) * mCamera.moveSpeed * dt;
+		mCamera.position -= mCamera.rotation * glm::vec3(0.0f, 0.0f, -1.0f) * mCamera.moveSpeed * dt;
 
 	if (mADown)
-		mCamera.position -= mCamera.rotation  * glm::vec3(1.0f, 0.0f, 0.0f) * mCamera.moveSpeed * dt;
+		mCamera.position -= mCamera.rotation * glm::vec3(1.0f, 0.0f, 0.0f) * mCamera.moveSpeed * dt;
 
 	if (mDDown)
-		mCamera.position += mCamera.rotation  * glm::vec3(1.0f, 0.0f, 0.0f) * mCamera.moveSpeed * dt;
+		mCamera.position += mCamera.rotation * glm::vec3(1.0f, 0.0f, 0.0f) * mCamera.moveSpeed * dt;
+
+	glm::vec3 speed = glm::vec3(3.0f);
+
+	if (mForwardDown)
+		mLights[0].position += speed * glm::vec3(0.0f, 0.0f, -1.0f) * dt;
+
+	if (mBackwardDown)
+		mLights[0].position -= speed * glm::vec3(0.0f, 0.0f, -1.0f) * dt;
+
+	if (mLeftDown)
+		mLights[0].position -= speed * glm::vec3(1.0f, 0.0f, 0.0f) * dt;
+
+	if (mRightDown)
+		mLights[0].position += speed * glm::vec3(1.0f, 0.0f, 0.0f) * dt;
+
+	if (mUpDown)
+		mLights[0].position += speed * glm::vec3(0.0f, 1.0f, 0.0f) * dt;
+
+	if (mDownDown)
+		mLights[0].position -= speed * glm::vec3(0.0f, 1.0f, 0.0f) * dt;
+
 }
 
 void BaseApp::onMouseButton(int button, int action, int mods)
@@ -174,6 +247,31 @@ void BaseApp::onKeyPress(int key, int scancode, int action, int mods)
 		case GLFW_KEY_D:
 			mDDown = true;
 			break;
+
+
+		case GLFW_KEY_KP_8:
+			mForwardDown = true;
+			break;
+		case GLFW_KEY_KP_5:
+			mBackwardDown = true;
+			break;
+		case GLFW_KEY_KP_4:
+			mLeftDown = true;
+			break;
+		case GLFW_KEY_KP_6:
+			mRightDown = true;
+			break;
+		case GLFW_KEY_LEFT_SHIFT:
+			mUpDown = true;
+			break;
+		case GLFW_KEY_LEFT_CONTROL:
+			mDownDown = true;
+			break;
+
+
+		case GLFW_KEY_ENTER:
+			mRenderer.reloadShaders();
+			break;
 		}
 	}
 	else if (action == GLFW_RELEASE)
@@ -192,10 +290,27 @@ void BaseApp::onKeyPress(int key, int scancode, int action, int mods)
 		case GLFW_KEY_D:
 			mDDown = false;
 			break;
+
+		case GLFW_KEY_KP_8:
+			mForwardDown = false;
+			break;
+		case GLFW_KEY_KP_5:
+			mBackwardDown = false;
+			break;
+		case GLFW_KEY_KP_4:
+			mLeftDown = false;
+			break;
+		case GLFW_KEY_KP_6:
+			mRightDown = false;
+			break;
+		case GLFW_KEY_LEFT_SHIFT:
+			mUpDown = false;
+			break;
+		case GLFW_KEY_LEFT_CONTROL:
+			mDownDown = false;
+			break;
 		}
 	}
-
-	mUI.onKeyPress(key, action);
 }
 
 void BaseApp::onCursorPosChange(double xPos, double yPos)

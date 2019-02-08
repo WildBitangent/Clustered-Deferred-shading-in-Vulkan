@@ -103,8 +103,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -114,13 +114,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>D:\VulkanSDK\1.1.77.0\Include;D:\VulkanSDK\GLFW\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\VulkanSDK\1.1.77.0\Lib;D:\VulkanSDK\GLFW\lib_x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\VulkanSDK\1.1.77.0\Include;D:\VulkanSDK\GLFW\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\VulkanSDK\1.1.77.0\Lib;D:\VulkanSDK\GLFW\lib_x64;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebug|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -149,7 +149,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;glslangd.lib;SPIRVd.lib;OSDependentd.lib;OGLCompilerd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;glslangd.lib;SPIRVd.lib;OSDependentd.lib;OGLCompilerd.lib;ImGUI_x64d.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>
       </IgnoreAllDefaultLibraries>
     </Link>
@@ -204,7 +204,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;ImGUI_x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebug|x64'">
@@ -223,7 +223,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;glslang.lib;SPIRV.lib;OSDependent.lib;OGLCompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;glslang.lib;SPIRV.lib;OSDependent.lib;OGLCompiler.lib;ImGUI_x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -267,6 +267,13 @@
     <ClInclude Include="src\Util.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="data\composite.frag" />
+    <None Include="data\composite.vert" />
+    <None Include="data\debug.frag" />
+    <None Include="data\debug.vert" />
+    <None Include="data\gbuffers.frag" />
+    <None Include="data\gbuffers.vert" />
+    <None Include="data\lightculling.comp" />
     <None Include="src\ShaderResourceConfig.inl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -32,6 +32,10 @@ struct MeshPart
 	vk::ImageView normalMap;
 	vk::ImageView specularMap;
 
+	bool hasAlbedo = false;
+	bool hasNormal = false;
+	bool hasSpecular = false;
+
 	uint32_t indexCount = 0;
 
 	MeshPart(const BufferSection& vertex, const BufferSection& index, uint32_t indexCount)

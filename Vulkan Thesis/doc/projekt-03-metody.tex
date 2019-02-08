@@ -1,0 +1,48 @@
+\chapter{Metódy vykreslovania veľa svetiel}
+V tejto kapitole sú popísané metódy pre vykreslovanie mnoho svetieľ v reálnom čase. Obyčajná metóda, ako napr. forward shading v ktorej objekt postupne prechádza celou grafickou pipeline, je absolútne nedostačujúca pre potreby vykreslovania scény s mnoho svetlami v reálnom čase. Pre tento účel sa používa deferred shading \cite{def-vs-for}.
+
+\section{Deferred shading}
+\label{deferred shading}
+Deferred shading (možný preklad ako odložené tieňovanie) je metóda, ktorá redukuje počet objektov, pre ktoré sa musí počítať osvetlovací model. Všetky objekty prejdú prvým priechodom, v ktorom sa vykreslia za použitia viacnásobných vykreslovacích cielov do jednotlivých geometrických bufferov, alebo v skratke G-bufferov. Do G-bufferov sa ukladajú jak farby daných fragmentov, tak normály, spekulárna zložka svetla, pozícia fragmentu (v mojom prípade transformovaná do view-space) a hĺbková mapa. Týmto spôsobom sa redukuje počet fragmentov, pre ktorý sa musí počítať osvetlenie na O(\textit{rozlíšenie~*~počet svetiel}). Samotný výpočet osvetlenia sa vykonáva ako 2D post proces. 
+
+Nevýhodou tejto metódy je náročnosť na veľkosť grafickej pamäte (rastúcou s rozlíšením) a teda aj s priepustnosťou frame bufferu. Ďaľšou nevýhodou je nepodporovaný alpha blending, ktorý ale môže byť vyriešený použitím forward shading pre transparentné objekty~\ref{hybrid}.
+
+\begin{figure*}[h]\centering
+  \centering
+  \includegraphics[width=0.33\linewidth]{obrazky-figures/placeholder.pdf}\hfill
+  \includegraphics[width=0.33\linewidth]{obrazky-figures/placeholder.pdf}\hfill
+  \includegraphics[width=0.33\linewidth]{obrazky-figures/placeholder.pdf}\hfill\\
+  \includegraphics[width=0.33\linewidth]{obrazky-figures/placeholder.pdf}\hfill
+  \includegraphics[width=0.33\linewidth]{obrazky-figures/placeholder.pdf}\hfill
+  \includegraphics[width=0.33\linewidth]{obrazky-figures/placeholder.pdf}\hfill
+  \caption{Obsah G-bufferov postupne z ľava: spojené g-buffere, albedo, normály, spekulárna zložka svetla, pozícia, hĺbková mapa.}
+  \label{G-buffers}
+\end{figure*}
+
+\section{Tiled deferred shading}
+Tiled shading je technika na redukovanie množstva svetelných výpočtov pre fragment. Jej princíp spočíva v nasledujúcich krokoch \cite{tiled-shading}:
+\begin{itemize}
+	\item Vykreslenie geometrie do G-bufferov
+	\item Vytvorenie screenspace dlaždíc 
+	\item Výpočítanie frustum a zistenie kolízií
+	\item Vypočítanie osvetlenia
+\end{itemize}
+
+\subsection*{Vykreslenie geometrie do G-bufferov}
+Jedná sa o klasický deferred rendering, kedy sa pomocou viacnásobných vykreslovacích cieľov vykreslí geometria do g-bufferov.
+
+\subsection*{Vytvorenie screenspace dlaždíc}
+Screen space sa rozsegmentuje na dlaždice s pevnou veľkosťou (typicky $32 \times 32$, alebo $16 \times 16$ pixelov), z ktorej každá obsahuje zoznam svetieľ, ktoré do nej patria a bude sa s nimi počítať osvetlovací model, pre fragmenty spadajúce do tejto dlaždice.
+
+\subsection*{Výpočítanie frustum a zistenie kolízií}
+Po vypočítaní frustum pre danú dlaždicu zisti svetlá, ktoré s ním kolidujú a pridaj ich do zoznamu kolidujúcich svetiel s danou dlaždicou.
+
+\subsection*{Vypočítanie osvetlenia}
+Pre každý fragment vo frame buffery zisti do akej dlaždice patrí a vypočítaj osvetlenie zo svetiel, ktoré boli pridané do zoznamu v minulom kroku.
+
+\section{Clustered deferred shading}
+\blind{10}
+
+\section{Hybridný algoritmus}
+\label{hybrid}
+\todo{A mozno aj nie}

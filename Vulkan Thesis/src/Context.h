@@ -31,6 +31,11 @@ public:
 		return mQueueFamilyIndices;
 	}
 
+	vk::Instance getInstance() const
+	{
+		return *mInstance;
+	}
+
 	vk::PhysicalDevice getPhysicalDevice() const
 	{
 		return mPhysicalDevice;
@@ -61,14 +66,14 @@ public:
 		return *mSurface;
 	}
 
-	vk::CommandPool getGraphicsCommandPool() const
+	vk::CommandPool getStaticCommandPool() const
 	{
-		return *mGraphicCommandPool;
+		return *mStaticCommandPool;
 	}
 
-	vk::CommandPool getComputeCommandPool() const
+	vk::CommandPool getDynamicCommandPool() const
 	{
-		return *mComputeCommandPool;
+		return *mDynamicCommandPool;
 	}
 
 private:
@@ -96,7 +101,7 @@ private:
 	vk::Queue				mPresentQueue;
 	vk::Queue				mComputeQueue;
 
-	vk::UniqueCommandPool	mGraphicCommandPool;
-	vk::UniqueCommandPool	mComputeCommandPool;
+	vk::UniqueCommandPool	mStaticCommandPool;
+	vk::UniqueCommandPool	mDynamicCommandPool;
 	//vk::PhysicalDeviceProperties	mPhyisicalDeviceProperties;
 };

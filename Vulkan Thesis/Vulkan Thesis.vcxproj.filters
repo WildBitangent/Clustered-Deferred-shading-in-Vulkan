@@ -79,5 +79,26 @@
     <None Include="src\ShaderResourceConfig.inl">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="data\composite.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\composite.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\debug.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\debug.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\gbuffers.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\gbuffers.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\lightculling.comp">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

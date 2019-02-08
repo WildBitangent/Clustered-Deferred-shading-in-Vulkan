@@ -1,7 +1,202 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+#define TILE_SIZE 32 // TODO bake it with compilation or w/e
+#define MAX_TILE_LIGHTS 1024
+
+// ------------- STRUCTS -------------
+struct Light
+{
+	vec3 position;
+	float radius;
+	vec3 intensity;
+	float pad;
+};
+
+struct LightOut
+{
+	uint count;
+	uint lights[MAX_TILE_LIGHTS];
+};
+
+struct ViewFrustum
+{
+	vec3 plane[4];
+	float minDepth;
+	float maxDepth;
+};
+
+// ------------- LAYOUTS -------------
+layout(set = 0, binding = 0) uniform CameraUBO
+{
+	mat4 view;
+	mat4 proj;
+	vec3 position;
+} camera;
+
+layout(std430, set = 1, binding = 0) buffer readonly LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 1) buffer writeonly LightsOut
+{
+	LightOut lightsOut[];
+};
+
+layout(set = 1, binding = 2) uniform sampler2D samplerDepth;
+
+// ------------- VARIABLES -------------
+shared ViewFrustum frustum;
+shared uint visibleLightCount;
+shared uint visibleLights[MAX_TILE_LIGHTS];
+shared uint minDepth;
+shared uint maxDepth;
+
+ViewFrustum createFrustum(uvec2 tileID, uvec2 tileCount)
+{
+	ViewFrustum frustum;
+	frustum.maxDepth = -uintBitsToFloat(maxDepth);
+	frustum.minDepth = -uintBitsToFloat(minDepth);
+
+	// vec2 step = 2.0 * vec2(1.0, 1.0) / vec2(tileCount);
+	vec2 step = 2.0 * vec2(TILE_SIZE, TILE_SIZE) / vec2(lightCount_screenSize.yz);
+	vec4 ndc[4];
+	
+	ndc[0] = vec4(step * tileID - 1.0, 1.0, 1.0); // top left	
+	ndc[1] = vec4(ndc[0].x, ndc[0].y + step.y, 1.0, 1.0); // bottom left
+	ndc[2] = vec4(ndc[0].x + step.x, ndc[1].y, 1.0, 1.0); // botom right
+	ndc[3] = vec4(ndc[2].x, ndc[0].y, 1.0, 1.0); // top right
+
+	mat4 invProj = inverse(camera.proj);
+	for (uint i = 0; i < 4; i++) 
+	{
+		ndc[i] = invProj * ndc[i];
+		ndc[i] /= ndc[i].w;
+	}
+
+	for (uint i = 0; i < 4; i++)
+		frustum.plane[i] = normalize(cross(ndc[i].xyz, ndc[(i + 1) & 3].xyz));
+
+	return frustum;
+}
+
+bool collides(uint index)
+{
+	vec3 position = (camera.view * vec4(lightsIn[index].position, 1.0)).xyz;
+	float radius = lightsIn[index].radius;
+	
+	for (uint i = 0; i < 4; i++) 
+	{
+		float distance = dot(frustum.plane[i], position);
+
+		if (distance > radius) 
+			return false;
+	}
+
+	if (frustum.maxDepth - position.z > radius || position.z - frustum.minDepth > radius)
+		return false;
+
+	return true;
+}
+
+
+layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
 void main ()
 {
+	if (gl_LocalInvocationIndex == 0)
+	{
+		minDepth = 0xFFFFFFFF;
+		maxDepth = 0;
+		visibleLightCount = 0;
+	}
+
+	barrier();
+
+	// --- depth for current tile ---
+	mat4 invProj = inverse(camera.proj);
+
+	float depth = texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r;
+	depth = 1.0 / (depth * invProj[2][3] + invProj[3][3]);
 	
+	uint depthInt = floatBitsToUint(depth);
+	atomicMin(minDepth, depthInt);
+	atomicMax(maxDepth, depthInt);
+
+	barrier();
+
+	// --- create frustum ---
+	if (gl_LocalInvocationIndex == 0)
+		frustum = createFrustum(gl_WorkGroupID.xy, gl_NumWorkGroups.xy);
+
+	barrier();
+
+	// --- light culling ---
+	uint threadCount = TILE_SIZE * TILE_SIZE;
+	for (uint lightNum = gl_LocalInvocationIndex; lightNum < lightCount_screenSize.x && visibleLightCount < MAX_TILE_LIGHTS; lightNum += threadCount)
+	{
+		if (collides(lightNum))
+		{
+			uint index = atomicAdd(visibleLightCount, 1);
+
+			if (index < MAX_TILE_LIGHTS)
+				visibleLights[index] = lightNum;
+		}
+	}
+
+	barrier();
+
+	// --- copy visible lights to global memory ---
+	uint index = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+	if (gl_LocalInvocationIndex == 0)
+	{
+		visibleLightCount = min(visibleLightCount, MAX_TILE_LIGHTS);
+		
+		lightsOut[index].count = visibleLightCount;
+		// lightsOut[index].count = 1;
+		// lightsOut[index].lights[0] = 0;
+
+		// lightsOut[index].lights[0] = lightCount_screenSize.x;
+		// lightsOut[index].lights[1] = lightCount_screenSize.y;
+		// lightsOut[index].lights[2] = lightCount_screenSize.z;
+		// // lightsOut.visibleLights[index].lights[3] = lightsIn.lightCount_screenSize.w;
+		// lightsOut[index].lights[4] = floatBitsToUint(lightsIn[0].position.x);
+		// lightsOut[index].lights[5] = floatBitsToUint(lightsIn[0].position.y);
+		// lightsOut[index].lights[6] = floatBitsToUint(lightsIn[0].position.z);
+		// lightsOut[index].lights[7] = floatBitsToUint(lightsIn[0].intensity.x);
+		// lightsOut[index].lights[8] = floatBitsToUint(lightsIn[0].intensity.y);
+		// lightsOut[index].lights[9] = floatBitsToUint(lightsIn[0].intensity.z);
+		// lightsOut[index].lights[10] = floatBitsToUint(lightsIn[0].radius);
+		// lightsOut[index].lights[11] = floatBitsToUint(lightsIn[0].pad);
+		// if (index == 0)
+		// {
+		// 	lightsOut[index].lights[0] = floatBitsToUint(lightsIn[2].position.x);
+		// 	lightsOut[index].lights[1] = floatBitsToUint(lightsIn[2].position.y);
+		// 	lightsOut[index].lights[2] = floatBitsToUint(lightsIn[2].position.z);
+		// 	lightsOut[index].lights[3] = floatBitsToUint(lightsIn[2].intensity.x);
+		// 	lightsOut[index].lights[4] = floatBitsToUint(lightsIn[2].intensity.y);
+		// 	lightsOut[index].lights[5] = floatBitsToUint(lightsIn[2].intensity.z);
+		// 	lightsOut[index].lights[6] = floatBitsToUint(lightsIn[2].radius);
+		// 	lightsOut[index].lights[7] = floatBitsToUint(lightsIn[2].pad);		
+		// 	lightsOut[index].lights[8] = floatBitsToUint(lightsIn[1].position.x);
+		// 	lightsOut[index].lights[9] = floatBitsToUint(lightsIn[1].position.y);
+		// 	lightsOut[index].lights[10] = floatBitsToUint(lightsIn[1].position.z);
+		// 	lightsOut[index].lights[11] = floatBitsToUint(lightsIn[1].intensity.x);
+		// 	lightsOut[index].lights[12] = floatBitsToUint(lightsIn[1].intensity.y);
+		// 	lightsOut[index].lights[13] = floatBitsToUint(lightsIn[1].intensity.z);
+		// 	lightsOut[index].lights[14] = floatBitsToUint(lightsIn[1].radius);
+		// 	lightsOut[index].lights[15] = floatBitsToUint(lightsIn[1].pad);
+		// }
+
+	}
+
+	barrier();
+
+	for (uint lightNum = gl_LocalInvocationIndex; lightNum < visibleLightCount; lightNum += threadCount)
+	{
+		lightsOut[index].lights[lightNum] = visibleLights[lightNum];
+	}
+
 }

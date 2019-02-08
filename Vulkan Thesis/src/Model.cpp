@@ -248,6 +248,9 @@ void Model::loadModel(const Context& context, const std::string& path, const vk:
 	auto device = context.getDevice();
 	Utility utility{ context };
 
+	// load proxy texture
+	mImages.emplace_back(utility.loadImageFromMemory({ 0, 0, 0, 0 }, 1, 1)); 
+
 	auto groups = loadModelFromFile(path);
 
 	vk::DeviceSize bufferSize = 0;
@@ -317,17 +320,28 @@ void Model::loadModel(const Context& context, const std::string& path, const vk:
 		{
 			mImages.emplace_back(utility.loadImageFromFile(group.albedoMapPath));
 			part.albedoMap = *mImages.back().view;
+			part.hasAlbedo = true;
 		}
+		else
+			part.albedoMap = *mImages[0].view;
+
 		if (!group.normalMapPath.empty())
 		{
 			mImages.emplace_back(utility.loadImageFromFile(group.normalMapPath));
 			part.normalMap = *mImages.back().view;
+			part.hasNormal = true;
 		}
+		else
+			part.normalMap = *mImages[0].view;
+
 		if (!group.specularMapPath.empty())
 		{
 			mImages.emplace_back(utility.loadImageFromFile(group.specularMapPath));
 			part.specularMap = *mImages.back().view;
+			part.hasSpecular = true;
 		}
+		else
+			part.specularMap = *mImages[0].view;
 
 		mParts.emplace_back(part);
 	}
@@ -364,9 +378,9 @@ void Model::loadModel(const Context& context, const std::string& path, const vk:
 		}
 
 		vk::DescriptorImageInfo albedoMapInfo;
-		if (part.albedoMap)
+		
 		{
-			ubo.hasAlbedoMap = 1;
+			ubo.hasAlbedoMap = part.hasAlbedo;
 			albedoMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 			albedoMapInfo.imageView = part.albedoMap;
 			albedoMapInfo.sampler = textureSampler;
@@ -382,9 +396,8 @@ void Model::loadModel(const Context& context, const std::string& path, const vk:
 		}
 
 		vk::DescriptorImageInfo normalmapInfo;
-		if (part.normalMap)
 		{
-			ubo.hasNormalMap = 1;
+			ubo.hasNormalMap = part.hasNormal;
 			normalmapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 			normalmapInfo.imageView = part.normalMap;
 			normalmapInfo.sampler = textureSampler;
@@ -400,9 +413,8 @@ void Model::loadModel(const Context& context, const std::string& path, const vk:
 		}
 
 		vk::DescriptorImageInfo specularmapInfo;
-		if (part.specularMap)
 		{
-			ubo.hasSpecularMap = 1;
+			ubo.hasSpecularMap = part.hasSpecular;
 			specularmapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 			specularmapInfo.imageView = part.specularMap;
 			specularmapInfo.sampler = textureSampler;

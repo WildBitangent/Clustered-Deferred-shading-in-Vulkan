@@ -5,6 +5,8 @@ VisualStudioVersion = 15.0.28010.2026
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Vulkan Thesis", "Vulkan Thesis\Vulkan Thesis.vcxproj", "{B31F3AFB-51F2-4CE1-BD43-E96F9369482A}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ImGUI", "Vulkan Thesis\external\ImGUI\ImGUI.vcxproj", "{33C82F22-7FC7-420D-B9DF-E511A85E1310}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -27,6 +29,18 @@ Global
 		{B31F3AFB-51F2-4CE1-BD43-E96F9369482A}.RelWithDebug|x64.Build.0 = RelWithDebug|x64
 		{B31F3AFB-51F2-4CE1-BD43-E96F9369482A}.RelWithDebug|x86.ActiveCfg = RelWithDebug|Win32
 		{B31F3AFB-51F2-4CE1-BD43-E96F9369482A}.RelWithDebug|x86.Build.0 = RelWithDebug|Win32
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Debug|x64.ActiveCfg = Debug|x64
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Debug|x64.Build.0 = Debug|x64
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Debug|x86.ActiveCfg = Debug|Win32
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Debug|x86.Build.0 = Debug|Win32
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Release|x64.ActiveCfg = Release|x64
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Release|x64.Build.0 = Release|x64
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Release|x86.ActiveCfg = Release|Win32
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.Release|x86.Build.0 = Release|Win32
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.RelWithDebug|x64.ActiveCfg = Debug|x64
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.RelWithDebug|x64.Build.0 = Debug|x64
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.RelWithDebug|x86.ActiveCfg = Debug|Win32
+		{33C82F22-7FC7-420D-B9DF-E511A85E1310}.RelWithDebug|x86.Build.0 = Debug|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

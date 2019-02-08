@@ -1,0 +1,11 @@
+\chapter{Nová generácia grafických API}
+Problém prečo potrebujeme ďaľšiu generáciu grafických API je, že dnešne grafické API (ako napr. OpenGL), ktoré vznikaly pred 20 rokmi, boli určené pre grafické karty s fixnou funkcionalitou. Programátor musel dodať vertex dáta v štandartnom formáte a bolo na výrobcovi grafickej karty, ako bude prebiehať tieňovanie a osvetlovanie. 
+
+Ako sa grafické karty postupom času vyvíjali, poskytovali viac a viac možností na konfigurovanie stavu. Všetka táto funkcionalita ale musela byť nabalená na už existujúce API, kvôli spätnej kompatibilite. Toto viedlo k nie moc ideálnej abstrakcii hardvéru, pretože nie všetko sa dá vyriešiť pridávaním novej funkcionality, ktorá reflektuje možnosti nových grafických kárt. Preto ovládač grafickej karty musí v dnešnej dobe robiť veľa \uv{odhadov} aby dokázal namapovať programátorov kód na dnešné grafické karty. Ďaľším limitujúcim faktom je, že z doby keď vznikali tieto grafické API, sa nepočítalo s viac vláknovím vykrelovaním a preto je takmer nemožné vykreslovať viac vláknovo pomocou knižnice OpenGL.
+
+Z týchto dôvodov vznikli nové grafické API ako Vulkan, DirectX 12, Metal, Mantle. 
+Vulkan je tzv. nástupca OpenGL, a vznikol z Mantle API. 
+Spôsob akým Vulkan odľahčuje záťaž na ovládač grafickej karty je, že je \todo{verbose} a všetko čo sa má diať v budúcosti, musí byť jasne povedané (dopredu daný stav grafickej pipeline, skompilované shader programy, \todo{}, ...) a ovládač sa stará najmä len o komunikáciu s grafickou kartou, kdežto pri OpenGL programátor nadeklaruje čo chce robiť a ako to chce robiť, a ovládač grafickej karty sa postára o zbitok, riešením veľa úloh na pozadí (napr. kompilovanie shader programov, alokovanie pamäte, vloženie synchronizačných štruktúr, atď). 
+Taktiež dovoľuje viac vláknové vytváranie a odosielanie príkazov (čo môže byť CPU \todo{bottleneck}), programátor musí zaručiť synchronizáciu a zvládnuť spravovanie grafickej pamäte, poskytujú efektívne \uv{recyklovanie} vykresľovacích príkazov, atď.
+
+\todo{references}

@@ -326,6 +326,11 @@ ImageParameters Utility::loadImageFromFile(std::string path)
 	if (lodepng::decode(pixels, width, height, path))
 		throw std::runtime_error("Failed to load png file: " + path);
 
+	return loadImageFromMemory(pixels, width, height);
+}
+
+ImageParameters Utility::loadImageFromMemory(std::vector<uint8_t> pixels, size_t width, size_t height)
+{
 	// create staging image memory
 	auto stagingBuffer = createBuffer(
 		width * height * 4,
@@ -362,7 +367,7 @@ vk::CommandBuffer Utility::beginSingleTimeCommands()
 {
 	vk::CommandBufferAllocateInfo allocInfo;
 	allocInfo.level = vk::CommandBufferLevel::ePrimary;
-	allocInfo.commandPool = mContext.getGraphicsCommandPool();
+	allocInfo.commandPool = mContext.getStaticCommandPool();
 	allocInfo.commandBufferCount = 1;
 
 	auto commandBuffer = mContext.getDevice().allocateCommandBuffers(allocInfo)[0];
@@ -387,7 +392,7 @@ void Utility::endSingleTimeCommands(vk::CommandBuffer buffer)
 	mContext.getGraphicsQueue().waitIdle();
 
 	// free the temperorary command buffer
-	mContext.getDevice().freeCommandBuffers(mContext.getGraphicsCommandPool(), buffer);
+	mContext.getDevice().freeCommandBuffers(mContext.getStaticCommandPool(), buffer);
 }
 
 void Utility::recordCopyBuffer(vk::CommandBuffer cmdBuffer, vk::Buffer src, vk::Buffer dst, vk::DeviceSize size,

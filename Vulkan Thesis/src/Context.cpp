@@ -334,6 +334,7 @@ void Context::createLogicalDevice()
 
 	vk::PhysicalDeviceFeatures deviceFeatures;
 	deviceFeatures.samplerAnisotropy = VK_TRUE;
+	deviceFeatures.fragmentStoresAndAtomics = VK_TRUE;
 
 	// Create the logical device
 	vk::DeviceCreateInfo deviceInfo;
@@ -365,8 +366,10 @@ void Context::createCommandPools()
 {
 	vk::CommandPoolCreateInfo poolInfo;
 	poolInfo.queueFamilyIndex = mQueueFamilyIndices.graphicsFamily;
-	//poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 
-	mGraphicCommandPool = mDevice->createCommandPoolUnique(poolInfo);
-	mComputeCommandPool = mDevice->createCommandPoolUnique(poolInfo);
+	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
+	mStaticCommandPool = mDevice->createCommandPoolUnique(poolInfo);
+
+	poolInfo.flags |= vk::CommandPoolCreateFlagBits::eTransient;
+	mDynamicCommandPool = mDevice->createCommandPoolUnique(poolInfo);
 }

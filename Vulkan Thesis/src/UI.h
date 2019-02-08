@@ -1,5 +1,9 @@
 #pragma once
 #include <string>
+#include "Util.h"
+
+struct GLFWwindow;
+class Renderer;
 
 enum class DebugStates : unsigned
 {
@@ -29,12 +33,46 @@ inline DebugStates& operator--(DebugStates& s)
 class UI
 {
 public:
+	struct Context
+	{
+		DebugStates debugState = DebugStates::disabled;
+		bool debugUniformDirtyBit = false;
+
+		int lightsCount = 1;
+		bool lightsAnimation = true;
+	} mContext;
+
+public:
+	UI(GLFWwindow* window, Renderer& renderer);
 
 	void onKeyPress(int key, int action);
 	DebugStates getDebugIndex() const;
 	bool debugStateUniformNeedsUpdate();
 
+	void update();
+	void copyDrawData();
+	void recordCommandBuffer();
+	vk::UniqueCommandBuffer& getCommandBuffer();
+
+public:
+	BufferParameters& getVertexBuffer();
+	BufferParameters& getIndexBuffer();
+
 private:
-	DebugStates mDebugIndex = DebugStates::disabled;
-	bool mDebugStateDirtyBit = false;
+	void setColorScheme();
+	void initResources();
+	void createPipeline();
+	
+private:
+	Renderer& mRenderer;
+
+	BufferParameters mVertexBuffer;
+	BufferParameters mIndexBuffer;
+	BufferParameters mStagingBuffer;
+
+	ImageParameters mFontTexture;
+	vk::UniqueSampler mSampler;
+
+	std::vector<vk::UniqueCommandBuffer> mCmdBuffers;
+	size_t mCommandBufferInUse = 0;
 };

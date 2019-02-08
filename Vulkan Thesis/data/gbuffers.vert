@@ -1,10 +1,6 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-// layout(push_constant) uniform PushConstants 
-// {
-// } pushConstants;
-
 layout(set = 0, binding = 0) uniform CameraUBO
 {
 	mat4 view;
@@ -37,21 +33,22 @@ out gl_PerVertex
 
 void main() 
 {
-	mat3 invTransModel = transpose(inverse(mat3(transform.model)));
+	mat4 viewModel = camera.view * transform.model;
+	mat3 invTransModel = transpose(inverse(mat3(viewModel)));
 	
-	gl_Position = camera.proj * camera.view * transform.model * vec4(inPosition, 1.0);
+	gl_Position = camera.proj * viewModel * vec4(inPosition, 1.0);
 
 	outColor = inColor;
 	outTexCoord = inTexCoord;
 
-	vec3 N = normalize(invTransModel * inNormal);
-	vec3 T = normalize(invTransModel * inTangent);
-	// T = normalize(T - dot(T, N) * N);
-	vec3 B = cross(N, T);
+	vec3 N = invTransModel * inNormal;
+	vec3 T = invTransModel * inTangent;
+	T -=  dot(T, N) * N;
+	// vec3 B = cross(N, T);
 
 	outNormal = N;
 	outTangent = T;
-	outBitangent = B;
+	// outBitangent = B;
 
-	outPosition = (camera.view * transform.model * vec4(inPosition, 1.0)).rgb;
+	outPosition = (viewModel * vec4(inPosition, 1.0)).rgb;
 }
