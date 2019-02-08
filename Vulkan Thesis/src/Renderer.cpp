@@ -906,7 +906,7 @@ void Renderer::createGBuffers()
 	{
 		mGBufferAttachments.normal = mUtility.createImage(
 			mSwapchainExtent.width, mSwapchainExtent.height,
-			vk::Format::eR16G16B16A16Sfloat,
+			vk::Format::eR16G16Sfloat,
 			vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
 			vk::MemoryPropertyFlagBits::eDeviceLocal

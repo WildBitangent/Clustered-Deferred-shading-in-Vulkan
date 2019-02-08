@@ -19,9 +19,25 @@ layout(location = 3) in vec3 normal;
 layout(location = 4) in vec3 tangent;
 layout(location = 5) in vec3 bitangent;
 
-layout(location = 0) out vec3 outPosition;
+layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outColor;
-layout(location = 2) out vec4 outNormal;
+layout(location = 2) out vec2 outNormal;
+
+// Returns ±1
+vec2 signNotZero(vec2 v) 
+{
+	return vec2((v.x >= 0.0) ? 1.0 : -1.0, (v.y >= 0.0) ? 1.0 : -1.0);
+}
+
+// Assume normalized input. Output is on [-1, 1] for each component.
+vec2 float32x3_to_oct(vec3 v) 
+{
+	// Project the sphere onto the octahedron, and then onto the xy plane
+	vec2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + abs(v.z)));
+
+	// Reflect the folds of the lower hemisphere over the diagonals
+	return (v.z <= 0.0) ? ((1.0 - abs(p.yx)) * signNotZero(p)) : p;
+}
 
 void main() 
 {
@@ -29,7 +45,6 @@ void main()
 	vec3 normalTex = vec3(0.5, 0.5, 1.0);
 	
 	outColor = vec4(1.0, 0.078, 0.576, 1.0);
-	outPosition = worldPos;
 
 	if (material.hasAlbedoMap > 0)
 		outColor = texture(albedoSampler, texCoord);
@@ -46,7 +61,7 @@ void main()
 
 
 	mat3 TBN = mat3(T, B, N);
-	vec3 onorm = TBN * normalize(normalTex * 2.0 - 1.0);
 
-	outNormal = vec4(onorm, specular);
+	outNormal = float32x3_to_oct(TBN * normalize(normalTex * 2.0 - 1.0));
+	outPosition = vec4(worldPos, specular);
 }

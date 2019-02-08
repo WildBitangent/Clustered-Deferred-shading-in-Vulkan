@@ -47,13 +47,28 @@ layout(location = 0) in vec2 inUV;
 layout(location = 0) out vec4 outFragcolor;
 
 
+// Returns ±1
+vec2 signNotZero(vec2 v) 
+{
+	return vec2((v.x >= 0.0) ? 1.0 : -1.0, (v.y >= 0.0) ? 1.0 : -1.0);
+}
+
+vec3 oct_to_float32x3(vec2 e) {
+	vec3 v = vec3(e.xy, 1.0 - abs(e.x) - abs(e.y));
+
+	if (v.z < 0) 
+		v.xy = (1.0 - abs(v.yx)) * signNotZero(v.xy);
+
+	return normalize(v);
+}
+
 void main() 
 {
 	// Get G-Buffer values
 	vec3 fragPos = texture(samplerposition, inUV).rgb;
 	vec4 albedo = texture(samplerAlbedo, inUV);
-	vec3 normal = texture(samplerNormal, inUV).rgb;
-	float specStrength = texture(samplerNormal, inUV).a;
+	vec3 normal = oct_to_float32x3(texture(samplerNormal, inUV).rg);
+	float specStrength = texture(samplerposition, inUV).a;
 
 	uvec2 tileID = uvec2(gl_FragCoord.xy) / uvec2(TILE_SIZE, TILE_SIZE);
 	uint index = tileID.y * ((pointLights.lightCount_screenSize.y - 1) / TILE_SIZE + 1) + tileID.x;
