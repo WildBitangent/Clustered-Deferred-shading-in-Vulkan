@@ -24,6 +24,7 @@ layout(set = 0, binding = 0) uniform CameraUBO
 {
 	mat4 view;
 	mat4 proj;
+	mat4 invProj;
 	vec3 position;
 } camera;
 
@@ -110,41 +111,3 @@ void main()
 
  	outFragcolor = vec4(fragcolor, 1.0);	
 }
-
-// void main() 
-// {
-// 	// Get G-Buffer values
-// 	vec3 fragPos = texture(samplerposition, inUV).rgb;
-// 	vec4 albedo = texture(samplerAlbedo, inUV);
-// 	vec3 normal = texture(samplerNormal, inUV).rgb;
-// 	float specStrength = texture(samplerNormal, inUV).a;
-
-// 	#define ambient 0.03
-// 	#define radius 3
-// 	vec3 lightPos = vec3(11.0, 1.5, -0.4);
-// 	vec3 camPos = vec3(camera.view[0][3], camera.view[1][3], camera.view[2][3]);
-	
-// 	// Ambient part
-// 	vec3 fragcolor = albedo.rgb * ambient;
-
-// 	vec3 L = lightPos - fragPos;
-// 	vec3 V = normalize(camera.position - fragPos);
-// 	vec3 N = normalize(normal);
-
-// 	float atten = radius / (pow(length(L), 2.0) + 1.0);
-// 	L = normalize(L);
-
-// 	// Diffuse part
-// 	vec3 diff = albedo.rgb * max(0.0, dot(N, L)) * atten;
-// 	fragcolor += diff;
-
-// 	// Specular part
-// 	// vec3 viewDir = normalize(fragPos);
-// 	vec3 R = reflect(-L, N);
-
-// 	float spec = max(0.0, dot(R, V));
-// 	vec3 specular = vec3(specStrength * pow(spec, 16.0)) * atten;
-// 	fragcolor += specular;
-
-//  	outFragcolor = vec4(fragcolor, 1.0);	
-// }

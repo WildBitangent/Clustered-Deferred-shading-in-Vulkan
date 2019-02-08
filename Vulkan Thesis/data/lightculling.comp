@@ -31,6 +31,7 @@ layout(set = 0, binding = 0) uniform CameraUBO
 {
 	mat4 view;
 	mat4 proj;
+	mat4 invProj;
 	vec3 position;
 } camera;
 
@@ -71,10 +72,9 @@ ViewFrustum createFrustum(uvec2 tileID, uvec2 tileCount)
 	ndc[2] = vec4(ndc[0].x + step.x, ndc[1].y, 1.0, 1.0); // botom right
 	ndc[3] = vec4(ndc[2].x, ndc[0].y, 1.0, 1.0); // top right
 
-	mat4 invProj = inverse(camera.proj);
 	for (uint i = 0; i < 4; i++) 
 	{
-		ndc[i] = invProj * ndc[i];
+		ndc[i] = camera.invProj * ndc[i];
 		ndc[i] /= ndc[i].w;
 	}
 
@@ -120,10 +120,8 @@ void main ()
 	// check if tile isn't out of screenSpace, if screen size isn't multiple of TILE_SIZE
 	if (gl_GlobalInvocationID.x < lightCount_screenSize.y && gl_GlobalInvocationID.y < lightCount_screenSize.z)
 	{
-		mat4 invProj = inverse(camera.proj);
-
 		float depth = texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r;
-		depth = 1.0 / (depth * invProj[2][3] + invProj[3][3]);
+		depth = 1.0 / (depth * camera.invProj[2][3] + camera.invProj[3][3]);
 		
 		uint depthInt = floatBitsToUint(depth);
 		atomicMin(minDepth, depthInt);

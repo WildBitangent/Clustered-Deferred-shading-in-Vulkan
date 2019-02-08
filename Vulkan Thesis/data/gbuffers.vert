@@ -5,6 +5,7 @@ layout(set = 0, binding = 0) uniform CameraUBO
 {
 	mat4 view;
 	mat4 proj;
+	mat4 invProj;
 	vec3 position;
 } camera;
 
