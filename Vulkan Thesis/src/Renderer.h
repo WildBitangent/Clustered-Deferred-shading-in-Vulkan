@@ -35,6 +35,7 @@ private:
 	void createGraphicsPipelines();
 	void createGBuffers();
 	void createUniformBuffers();
+	void createClusteredBuffers();
 	void createLights();
 	void createDescriptorPool();
 	void createDescriptorSets();
@@ -98,10 +99,25 @@ private:
 	BufferParameters mDebugUniformBuffer;
 
 	// TODO refactor
-	BufferParameters mLightsOutBuffer;
-
+	BufferParameters mLightsBuffers;
 	BufferParameters mPointLightsStagingBuffer;
-	BufferParameters mPointLightsBuffer;
+	vk::DeviceSize mLightsOutOffset;
+	vk::DeviceSize mPointLightsOffset;
+	vk::DeviceSize mLightsIndirectionOffset;
+
+	vk::DeviceSize mLightsOutSize;
+	vk::DeviceSize mPointLightsSize;
+	vk::DeviceSize mLightsIndirectionSize;
+
+	// Cluster buffer
+	BufferParameters mClusteredBuffer;
+	vk::DeviceSize mPageTableOffset;
+	vk::DeviceSize mPagePoolOffset;
+	vk::DeviceSize mUniqueClustersOffset;
+
+	vk::DeviceSize mPageTableSize;
+	vk::DeviceSize mPagePoolSize;
+	vk::DeviceSize mUniqueClustersSize;
 
 	friend class UI;
 };

@@ -1,0 +1,32 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(std430, set = 1, binding = 4) buffer pageTable
+{
+	uint pageCounter; // make it 2
+	uint nodes[];
+} table;
+
+shared uint counter;
+
+layout(local_size_x = 64) in;
+void main()
+{
+	if (gl_LocalInvocationIndex == 0)
+		counter = 2;
+
+	barrier();
+
+	for (uint i = gl_LocalInvocationID.x; i < 32768; i += 64)
+	{
+		if (table.nodes[i] == 1)
+			table.nodes[i] = atomicAdd(counter, 1);
+		else
+			table.nodes[i] = 0;
+	}
+
+	barrier();
+
+	if (gl_LocalInvocationIndex == 0)
+		table.pageCounter = counter - 2;
+}

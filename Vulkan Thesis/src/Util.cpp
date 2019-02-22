@@ -6,6 +6,7 @@
 
 #include <glslang/public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
+#include <SPIRV/disassemble.h>
 #include <StandAlone/DirStackFileIncluder.h>
 #include <iostream>
 
@@ -147,6 +148,9 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	spv::SpvBuildLogger logger;
 	glslang::SpvOptions spvOptions;
 	glslang::GlslangToSpv(*program.getIntermediate(shaderType), spirV, &logger, &spvOptions);
+
+	// std::ofstream outFile(filename + ".spv"); // TODO make spv folder or smth
+	// spv::Disassemble(outFile, spirV);
 
 	return spirV;
 }

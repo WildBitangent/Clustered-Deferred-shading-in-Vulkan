@@ -12,6 +12,7 @@ enum class DebugStates : unsigned
 	normal,
 	specular,
 	position,
+	depth,
 
 	count
 };

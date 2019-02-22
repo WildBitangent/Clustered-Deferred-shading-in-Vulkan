@@ -1,8 +1,11 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+
 #define TILE_SIZE 32 // TODO bake it with compilation or w/e
-#define MAX_TILE_LIGHTS 1024
+#define PAGE_SIZE 512
+#define PAGE_SIZE_POWER 9
+#define Y_SLICES 0.027398974188114442743140954270042618454096202801626751934
 
 // ------------- STRUCTS -------------
 struct Light
@@ -13,17 +16,11 @@ struct Light
 	float pad;
 };
 
-struct LightOut
-{
-	uint count;
-	uint lights[MAX_TILE_LIGHTS];
-};
-
 struct ViewFrustum
 {
-	vec3 plane[4];
-	float minDepth;
-	float maxDepth;
+	vec3 plane[6];
+	float near;
+	float far;
 };
 
 // ------------- LAYOUTS -------------
@@ -44,126 +41,155 @@ layout(std430, set = 1, binding = 0) buffer readonly LightsIn
 
 layout(std430, set = 1, binding = 1) buffer writeonly LightsOut
 {
-	LightOut lightsOut[];
-};
+	uint count;
+	uint lights[];
+} lightsOut;
 
-layout(set = 1, binding = 2) uniform sampler2D samplerDepth;
+layout(std430, set = 1, binding = 4) buffer readonly PageTable
+{
+	uint counter;
+	uint nodes[];
+} table;
+
+layout(std430, set = 1, binding = 5) buffer writeonly PagePool
+{
+	uint data[];
+} pool;
+
+layout(std430, set = 1, binding = 6) buffer readonly CompactedClusters
+{
+	uint counter;
+	uint data[];
+} comp;
 
 // ------------- VARIABLES -------------
-shared ViewFrustum frustum;
-shared uint visibleLightCount;
-shared uint visibleLights[MAX_TILE_LIGHTS];
-shared uint minDepth;
-shared uint maxDepth;
-
-ViewFrustum createFrustum(uvec2 tileID, uvec2 tileCount)
+ViewFrustum createFrustum(uvec3 clusterID)
 {
 	ViewFrustum frustum;
-	frustum.maxDepth = -uintBitsToFloat(maxDepth);
-	frustum.minDepth = -uintBitsToFloat(minDepth);
 
-	// vec2 step = 2.0 * vec2(1.0, 1.0) / vec2(tileCount);
-	vec2 step = 2.0 * vec2(TILE_SIZE, TILE_SIZE) / vec2(tileCount * TILE_SIZE);
-	// vec2 step = 2.0 * vec2(TILE_SIZE, TILE_SIZE) / vec2(lightCount_screenSize.yz);
-	vec4 ndc[4];
+	// frustum.near = -exp(clusterID.z * Y_SLICES) * 0.5;
+	// frustum.far = -exp((clusterID.z + 1) * Y_SLICES) * 0.5;
+	// frustum.near = ( -frustum.near * (100.0 + 0.5) / (100.0 - 0.5) - 2 * 100.0 * 0.5 / (100.0 - 0.5) ) / -frustum.near;
+	// frustum.far = ( -frustum.far * (100.0 + 0.5) / (100.0 - 0.5) - 2 * 100.0 * 0.5 / (100.0 - 0.5) ) / -frustum.far;
+
+	frustum.near = (1.0 / (exp(clusterID.z * Y_SLICES) * 0.5) - 2) / -1.99;
+	frustum.far = (1.0 / (exp((clusterID.z + 1) * Y_SLICES) * 0.5) - 2) / -1.99;
+	// frustum.near = 2.0 * frustum.near - 1.0;
+	// frustum.far = 2.0 * frustum.far - 1.0;
 	
-	ndc[0] = vec4(step * tileID - 1.0, 1.0, 1.0); // top left	
-	ndc[1] = vec4(ndc[0].x, ndc[0].y + step.y, 1.0, 1.0); // bottom left
-	ndc[2] = vec4(ndc[0].x + step.x, ndc[1].y, 1.0, 1.0); // botom right
-	ndc[3] = vec4(ndc[2].x, ndc[0].y, 1.0, 1.0); // top right
+	uvec2 tileCount = (lightCount_screenSize.yz - 1) / TILE_SIZE + 1;
+	uvec2 tileID = clusterID.xy;
+	vec2 step = 2.0 * vec2(TILE_SIZE, TILE_SIZE) / vec2(tileCount * TILE_SIZE);
 
+	vec2 ndc[4];
+	ndc[0] = vec2(step * tileID - 1.0); // top left	
+	ndc[1] = vec2(ndc[0].x, ndc[0].y + step.y); // bottom left
+	ndc[2] = vec2(ndc[0].x + step.x, ndc[1].y); // botom right
+	ndc[3] = vec2(ndc[2].x, ndc[0].y); // top right
+
+	vec4 frustumPoints[8];
 	for (uint i = 0; i < 4; i++) 
 	{
-		ndc[i] = camera.invProj * ndc[i];
-		ndc[i] /= ndc[i].w;
+		frustumPoints[i] = camera.invProj * vec4(ndc[i], frustum.near, 1.0);
+		frustumPoints[i] /= frustumPoints[i].w;
+		frustumPoints[i + 4] = camera.invProj * vec4(ndc[i], frustum.far, 1.0);
+		frustumPoints[i + 4] /= frustumPoints[i + 4].w;
 	}
 
 	for (uint i = 0; i < 4; i++)
-		frustum.plane[i] = normalize(cross(ndc[i].xyz, ndc[(i + 1) & 3].xyz));
+		frustum.plane[i] = normalize(cross(frustumPoints[i].xyz, frustumPoints[(i + 1) & 3].xyz));
+
+	frustum.far = frustumPoints[0].z;
+	frustum.near = frustumPoints[4].z;
+
+	// near
+	frustum.plane[4] = normalize(cross(frustumPoints[3].xyz - frustumPoints[0].xyz, frustumPoints[1].xyz - frustumPoints[0].xyz));
+
+	// far
+	frustum.plane[5] = normalize(cross(frustumPoints[5].xyz - frustumPoints[4].xyz, frustumPoints[7].xyz - frustumPoints[4].xyz));
 
 	return frustum;
 }
 
-bool collides(uint index)
+bool collide(ViewFrustum frustum, vec3 position, float radius)
 {
-	vec3 position = (camera.view * vec4(lightsIn[index].position, 1.0)).xyz;
-	float radius = lightsIn[index].radius;
-	
-	for (uint i = 0; i < 4; i++) 
+	for (uint i = 0; i < 4; i++)
 	{
+		// float distance = dot(frustum.plane[i], position) + radius;
+
+		// if (distance <= 0.0)
+		// 	return false;
 		float distance = dot(frustum.plane[i], position);
 
-		if (distance > radius) 
+		if (distance > radius)
 			return false;
 	}
-
-	if (frustum.maxDepth - position.z > radius || position.z - frustum.minDepth > radius)
+	if (position.z < frustum.near - radius || position.z > frustum.far + radius)
 		return false;
+
+	// if (position.z > frustum.far + radius)
+	// 	return false;
 
 	return true;
 }
 
+uint addressTranslate(uint virtualAddress)
+{
+	uint pageNumber = virtualAddress >> PAGE_SIZE_POWER;
+	uint pageAddress = (table.nodes[pageNumber] - 2) * PAGE_SIZE;
+	uint offset = virtualAddress % PAGE_SIZE;
 
-layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
-void main ()
+	return pageAddress + offset;
+}
+
+layout(local_size_x = 64) in;
+void main()
 {
 	if (gl_LocalInvocationIndex == 0)
 	{
-		minDepth = 0xFFFFFFFF;
-		maxDepth = 0;
-		visibleLightCount = 0;
+		lightsOut.lights[0] = 0; // used as dummy for cluster without light
+		lightsOut.count = 1;
 	}
 
 	barrier();
 
-	// --- depth for current tile ---
-	// check if tile isn't out of screenSpace, if screen size isn't multiple of TILE_SIZE
-	if (gl_GlobalInvocationID.x < lightCount_screenSize.y && gl_GlobalInvocationID.y < lightCount_screenSize.z)
+	for (uint i = gl_LocalInvocationIndex; i < comp.counter; i += 64)
 	{
-		float depth = texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r;
-		depth = 1.0 / (depth * camera.invProj[2][3] + camera.invProj[3][3]);
-		
-		uint depthInt = floatBitsToUint(depth);
-		atomicMin(minDepth, depthInt);
-		atomicMax(maxDepth, depthInt);
-	}
+		uint key = comp.data[i];
+		ViewFrustum frustum = createFrustum(uvec3(key & 0x7F, (key >> 7) & 0x7F, key >> 14));
 
-	barrier();
+		uint lightCount = 0;
+		uint lightIndices[256];
 
-	// --- create frustum ---
-	if (gl_LocalInvocationIndex == 0)
-		frustum = createFrustum(gl_WorkGroupID.xy, gl_NumWorkGroups.xy);
-
-	barrier();
-
-	// --- light culling ---
-	uint threadCount = TILE_SIZE * TILE_SIZE;
-	for (uint lightNum = gl_LocalInvocationIndex; lightNum < lightCount_screenSize.x && visibleLightCount < MAX_TILE_LIGHTS; lightNum += threadCount)
-	{
-		if (collides(lightNum))
+		for (uint x = 0; x < lightCount_screenSize.x; x++)
 		{
-			uint index = atomicAdd(visibleLightCount, 1);
-
-			if (index < MAX_TILE_LIGHTS)
-				visibleLights[index] = lightNum;
+			vec3 position = (camera.view * vec4(lightsIn[x].position, 1.0)).xyz;
+			if (collide(frustum, position, lightsIn[x].radius))
+			{
+				lightIndices[lightCount++] = x;
+			}				
 		}
+
+		if (i == 0)
+		{
+			uint index = atomicAdd(lightsOut.count, 4);
+			vec4 position = camera.view * vec4(lightsIn[0].position, 1.0);
+			lightsOut.lights[index++] = floatBitsToUint(frustum.near);
+			lightsOut.lights[index++] = floatBitsToUint(frustum.far);
+			lightsOut.lights[index++] = floatBitsToUint(position.z);
+			lightsOut.lights[index++] = key >> 14;
+		}
+
+		if (lightCount > 0)
+		{
+			uint index = atomicAdd(lightsOut.count, lightCount + 1);
+			pool.data[addressTranslate(key)] = index;
+			lightsOut.lights[index++] = lightCount;
+			
+			for (uint x = 0; x < lightCount; x++)
+				lightsOut.lights[index + x] = lightIndices[x];
+		}
+		else
+			pool.data[addressTranslate(key)] = 0; // point to dummy
 	}
-
-	barrier();
-
-	// --- copy visible lights to global memory ---
-	uint index = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
-	if (gl_LocalInvocationIndex == 0)
-	{
-		visibleLightCount = min(visibleLightCount, MAX_TILE_LIGHTS);
-		lightsOut[index].count = visibleLightCount;
-	}
-
-	barrier();
-
-	for (uint lightNum = gl_LocalInvocationIndex; lightNum < visibleLightCount; lightNum += threadCount)
-	{
-		lightsOut[index].lights[lightNum] = visibleLights[lightNum];
-	}
-
 }

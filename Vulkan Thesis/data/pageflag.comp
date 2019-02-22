@@ -1,0 +1,66 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+#define TILE_SIZE 32 // TODO bake it with compilation or w/e
+#define PAGE_SIZE_POWER 9 // 2^9 TODO push constants?
+#define NEAR 0.5
+#define Y_SLICES 0.027398974188114442743140954270042618454096202801626751934
+
+// --- structs ---
+struct Light
+{
+	vec3 position;
+	float radius;
+	vec3 intensity;
+	float pad;
+};
+
+layout(set = 0, binding = 0) uniform CameraUBO
+{
+	mat4 view;
+	mat4 proj;
+	mat4 invProj;
+	vec3 position;
+} camera;
+
+layout(set = 1, binding = 3) uniform sampler2D samplerDepth;
+
+layout(std430, set = 1, binding = 4) buffer writeonly pageTable
+{
+	uint counter; // todo make it 2 at start
+	uint nodes[];
+} table;
+
+layout(std430, set = 1, binding = 0) buffer readonly LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+uint packKey(uvec3 key)
+{
+	return key.x | key.y << 7 | (key.z & 0x3FF) << 14;
+}
+
+float getViewDepth(float projDepth)
+{
+	float normalizedProjDepth = projDepth * 2.0 - 1.0;
+	// return 1.0 / (normalizedProjDepth * camera.invProj[2][3] + camera.invProj[3][3]);
+	return camera.proj[3][2] / (normalizedProjDepth + camera.proj[2][2]);
+}
+
+layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+void main()
+{
+	if (gl_GlobalInvocationID.x >= lightCount_screenSize.y || gl_GlobalInvocationID.y >= lightCount_screenSize.z)
+		return;
+
+	uvec2 tileID = gl_WorkGroupID.xy;
+	float depth = getViewDepth(texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r);
+	uint k = uint(log(depth / NEAR) / Y_SLICES); // 72 slices along Y
+
+	uint address = packKey(uvec3(tileID, k));
+
+	table.nodes[address >> PAGE_SIZE_POWER] = 1;
+}

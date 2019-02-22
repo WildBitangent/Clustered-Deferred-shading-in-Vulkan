@@ -8,6 +8,7 @@
 #include "BaseApp.h"
 #include "imgui.h"
 
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
 // TODO refactor this
 constexpr auto WIDTH = 1024;
@@ -58,6 +59,7 @@ Renderer::Renderer(GLFWwindow* window)
 	createGraphicsPipelines();
 	createComputePipeline();
 	createUniformBuffers();
+	createClusteredBuffers();
 	createLights();
 	createDescriptorPool();
 	mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource);
@@ -489,25 +491,28 @@ void Renderer::createDescriptorSetLayouts()
 
 	// Light culling
 	{
-		vk::DescriptorSetLayoutBinding pointLightsBinding;
-		pointLightsBinding.binding = 0;
-		pointLightsBinding.descriptorType = vk::DescriptorType::eStorageBuffer;
-		pointLightsBinding.descriptorCount = 1;
-		pointLightsBinding.stageFlags = vk::ShaderStageFlagBits::eCompute;
+		std::vector<vk::DescriptorSetLayoutBinding> bindings;
 
-		vk::DescriptorSetLayoutBinding lightsOutBinding;
-		lightsOutBinding.binding = 1;
-		lightsOutBinding.descriptorType = vk::DescriptorType::eStorageBuffer;
-		lightsOutBinding.descriptorCount = 1;
-		lightsOutBinding.stageFlags = vk::ShaderStageFlagBits::eCompute;
+		// point lights
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
 
-		vk::DescriptorSetLayoutBinding depthBinding;
-		depthBinding.binding = 2;
-		depthBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		depthBinding.descriptorCount = 1;
-		depthBinding.stageFlags = vk::ShaderStageFlagBits::eCompute;
+		// lights out
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+		
+		// lights indirection
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+		
+		// depth binding
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eCompute);
+		
+		// page table
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
 
-		std::array<vk::DescriptorSetLayoutBinding, 3> bindings = { pointLightsBinding, lightsOutBinding, depthBinding };
+		// page pool
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+
+		// unique clusters
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
 
 		vk::DescriptorSetLayoutCreateInfo createInfo;
 		createInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -518,47 +523,37 @@ void Renderer::createDescriptorSetLayouts()
 
 	// Composition
 	{
-		vk::DescriptorSetLayoutBinding pointLightsBinding;
-		pointLightsBinding.binding = 0;
-		pointLightsBinding.descriptorType = vk::DescriptorType::eStorageBuffer;
-		pointLightsBinding.descriptorCount = 1;
-		pointLightsBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		std::vector<vk::DescriptorSetLayoutBinding> bindings;
+		
+		// point lights
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment);
 
-		vk::DescriptorSetLayoutBinding lightsOutBinding;
-		lightsOutBinding.binding = 1;
-		lightsOutBinding.descriptorType = vk::DescriptorType::eStorageBuffer;
-		lightsOutBinding.descriptorCount = 1;
-		lightsOutBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		// lights out
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment);
 
-		vk::DescriptorSetLayoutBinding positionBinding;
-		positionBinding.binding = 2;
-		positionBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		positionBinding.descriptorCount = 1;
-		positionBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		// lights indirection
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment);
 
-		vk::DescriptorSetLayoutBinding albedoBinding;
-		albedoBinding.binding = 3;
-		albedoBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		albedoBinding.descriptorCount = 1;
-		albedoBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		// position
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment);
 
-		vk::DescriptorSetLayoutBinding normalBinding;
-		normalBinding.binding = 4;
-		normalBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		normalBinding.descriptorCount = 1;
-		normalBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		// albedo
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment);
 
-		vk::DescriptorSetLayoutBinding specularBinding;
-		specularBinding.binding = 5;
-		specularBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		specularBinding.descriptorCount = 1;
-		specularBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+		// normal
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment);
 
-		std::array<vk::DescriptorSetLayoutBinding, 6> bindings = { 
-			pointLightsBinding, lightsOutBinding, 
-			positionBinding, 
-			albedoBinding, normalBinding, specularBinding 
-		};
+		// depth
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment);
+		
+		// page table
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment);
+
+		// page pool
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment);
+
+		// unique clusters
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment);
 
 		vk::DescriptorSetLayoutCreateInfo createInfo;
 		createInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -996,32 +991,70 @@ void Renderer::createUniformBuffers()
 	}
 }
 
+void Renderer::createClusteredBuffers()
+{
+	// key size [10, 7, 7]	24b
+	//			[ z, y, x]
+	// page size 2^9		512B
+	// key count / page size ... 2^24 / 2^9
+	
+	// page table
+	constexpr vk::DeviceSize pageTableSize = (32'768 + 1) * sizeof(uint32_t) + 32 - (32'769 * 4 % 0x20);
+	mPageTableOffset = 0;
+	mPageTableSize = pageTableSize;
+
+	// physical page pool
+	constexpr vk::DeviceSize pageCount = 2048;
+	constexpr vk::DeviceSize pageSize = 512 * sizeof(uint32_t) + 32 - (512 * 4 % 0x20);
+	
+	constexpr vk::DeviceSize pagePoolSize = pageCount * pageSize;
+	mPagePoolOffset = pageTableSize;
+	mPagePoolSize = pagePoolSize;
+
+	// compacted clusters range
+	constexpr vk::DeviceSize compactedClustersSize = (2048 * sizeof(uint16_t)); // tile can have max 255 unique clusters + number of clusters
+	constexpr vk::DeviceSize compactedRangeSize = compactedClustersSize * TILE_COUNT_X * TILE_COUNT_Y + sizeof(uint16_t); // + cluster index counter
+	mUniqueClustersOffset = mPagePoolOffset + pagePoolSize;
+	mUniqueClustersSize = compactedRangeSize;
+
+	// allocate buffer
+	constexpr vk::DeviceSize bufferSize = pageTableSize + pagePoolSize + compactedRangeSize;
+
+	mClusteredBuffer = mUtility.createBuffer(
+		bufferSize,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
+}
+
 void Renderer::createLights()
 {
-	// create buffers
-	{
-		mLightsOutBuffer = mUtility.createBuffer(
-			sizeof(uint32_t) * (MAX_LIGHTS_PER_TILE + 1) * TILE_COUNT_X * TILE_COUNT_Y, // ... + 1 => storing light counter for tile
-			vk::BufferUsageFlagBits::eStorageBuffer,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
+	constexpr vk::DeviceSize lightsOutSize = sizeof(uint32_t) * (MAX_LIGHTS_PER_TILE + 1) * TILE_COUNT_X * TILE_COUNT_Y; // ... + 1 => storing light counter for tile
+	constexpr vk::DeviceSize pointLightsSize = sizeof(PointLight) * MAX_POINTLIGHTS/* + sizeof(glm::vec4)*/; // ... + size of LightParams struct
+	constexpr vk::DeviceSize indirectionSize = TILE_COUNT_X * TILE_COUNT_Y * sizeof(uint32_t)/* + sizeof(uint32_t)*/; // ... + global light counter
 
-		vk::DeviceSize bufferSize = sizeof(PointLight) * MAX_POINTLIGHTS + sizeof(glm::vec4); // ... + size of LightParams struct
+	mLightsOutOffset = 0;
+	mPointLightsOffset = lightsOutSize;
+	mLightsIndirectionOffset = mPointLightsOffset + pointLightsSize;
 
-		mPointLightsStagingBuffer = mUtility.createBuffer(
-			bufferSize,
-			vk::BufferUsageFlagBits::eTransferSrc,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-		);
+	mLightsOutSize = lightsOutSize;
+	mPointLightsSize = pointLightsSize;
+	mLightsIndirectionSize = indirectionSize;
 
-		mPointLightsBuffer = mUtility.createBuffer(
-			bufferSize,
-			vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-	}
+	constexpr vk::DeviceSize bufferSize = pointLightsSize + lightsOutSize + indirectionSize;
 
-	// TODO fill buffer with lights
+	// allocate buffer
+	mPointLightsStagingBuffer = mUtility.createBuffer(
+		pointLightsSize,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+
+	mLightsBuffers = mUtility.createBuffer(
+		bufferSize,
+		vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
 }
 
 void Renderer::createDescriptorPool()
@@ -1033,12 +1066,12 @@ void Renderer::createDescriptorPool()
 	poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
 	poolSizes[1].descriptorCount = 100; 
 	poolSizes[2].type = vk::DescriptorType::eStorageBuffer;
-	poolSizes[2].descriptorCount = 2; // used for lightculling
+	poolSizes[2].descriptorCount = 100;
 
 	vk::DescriptorPoolCreateInfo poolInfo;
 	poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 	poolInfo.pPoolSizes = poolSizes.data();
-	poolInfo.maxSets = 202;
+	poolInfo.maxSets = 300;
 	poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
 	
 	mDescriptorPool = mContext.getDevice().createDescriptorPoolUnique(poolInfo);
@@ -1099,118 +1132,101 @@ void Renderer::createDescriptorSets()
 		descriptorWrites.emplace_back(writes);
 	}
 
-	// Light culling
 	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
-
-		auto targetSet = mResource.descriptorSet.add("lightculling", allocInfo);
-		
 		vk::DescriptorBufferInfo pointLightsInfo;
-		pointLightsInfo.buffer = *mPointLightsBuffer.handle;
-		pointLightsInfo.offset = 0;
-		pointLightsInfo.range = mPointLightsBuffer.size;
+		pointLightsInfo.buffer = *mLightsBuffers.handle;
+		pointLightsInfo.offset = mPointLightsOffset;
+		pointLightsInfo.range = mPointLightsSize;
 
 		vk::DescriptorBufferInfo lightsOutInfo;
-		lightsOutInfo.buffer = *mLightsOutBuffer.handle;
-		lightsOutInfo.offset = 0;
-		lightsOutInfo.range = mLightsOutBuffer.size;
+		lightsOutInfo.buffer = *mLightsBuffers.handle;
+		lightsOutInfo.offset = mLightsOutOffset;
+		lightsOutInfo.range = mLightsOutSize;
+
+		vk::DescriptorBufferInfo lightsIndirectionInfo;
+		lightsIndirectionInfo.buffer = *mLightsBuffers.handle;
+		lightsIndirectionInfo.offset = mLightsIndirectionSize;
+		lightsIndirectionInfo.range = mLightsIndirectionOffset;
+
+		vk::DescriptorBufferInfo pageTableInfo;
+		pageTableInfo.buffer = *mClusteredBuffer.handle;
+		pageTableInfo.offset = mPageTableOffset;
+		pageTableInfo.range = mPageTableSize;
+
+		vk::DescriptorBufferInfo pagePoolInfo;
+		pagePoolInfo.buffer = *mClusteredBuffer.handle;
+		pagePoolInfo.offset = mPagePoolOffset;
+		pagePoolInfo.range = mPagePoolSize;
+
+		vk::DescriptorBufferInfo uniqueClustersInfo;
+		uniqueClustersInfo.buffer = *mClusteredBuffer.handle;
+		uniqueClustersInfo.offset = mUniqueClustersOffset;
+		uniqueClustersInfo.range = mUniqueClustersSize;
 
 		vk::DescriptorImageInfo depthInfo;
 		depthInfo.sampler = *mGBufferAttachments.sampler;
 		depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 		depthInfo.imageView = *mGBufferAttachments.depth.view;
 
-		std::array<vk::WriteDescriptorSet, 3> writes;
-		writes[0].dstSet = targetSet;
-		writes[0].descriptorCount = 1;
-		writes[0].dstBinding = 0;
-		writes[0].descriptorType = vk::DescriptorType::eStorageBuffer;
-		writes[0].pBufferInfo = &pointLightsInfo;
+		// Light culling
+		{
+			vk::DescriptorSetAllocateInfo allocInfo;
+			allocInfo.descriptorPool = *mDescriptorPool;
+			allocInfo.descriptorSetCount = 1;
+			allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
 
-		writes[1].dstSet = targetSet;
-		writes[1].descriptorCount = 1;
-		writes[1].dstBinding = 1;
-		writes[1].descriptorType = vk::DescriptorType::eStorageBuffer;
-		writes[1].pBufferInfo = &lightsOutInfo;
+			auto targetSet = mResource.descriptorSet.add("lightculling", allocInfo);
 
-		writes[2].dstSet = targetSet;
-		writes[2].descriptorCount = 1;
-		writes[2].dstBinding = 2;
-		writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		writes[2].pImageInfo = &depthInfo;
+			std::vector<vk::WriteDescriptorSet> writes;
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pointLightsInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsOutInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsIndirectionInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &depthInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pageTableInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pagePoolInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &uniqueClustersInfo);
 
-		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
-	}
+			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
+		}
 
-	// composition
-	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("composition");
+		// composition
+		{
+			vk::DescriptorSetAllocateInfo allocInfo;
+			allocInfo.descriptorPool = *mDescriptorPool;
+			allocInfo.descriptorSetCount = 1;
+			allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("composition");
 
-		auto targetSet = mResource.descriptorSet.add("composition", allocInfo);
+			auto targetSet = mResource.descriptorSet.add("composition", allocInfo);
 
-		vk::DescriptorBufferInfo pointLightsInfo;
-		pointLightsInfo.buffer = *mPointLightsBuffer.handle;
-		pointLightsInfo.offset = 0;
-		pointLightsInfo.range = mPointLightsBuffer.size;
+			vk::DescriptorImageInfo positionInfo;
+			positionInfo.sampler = *mGBufferAttachments.sampler;
+			positionInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			positionInfo.imageView = *mGBufferAttachments.position.view;
 
-		vk::DescriptorBufferInfo lightsOutInfo;
-		lightsOutInfo.buffer = *mLightsOutBuffer.handle;
-		lightsOutInfo.offset = 0;
-		lightsOutInfo.range = mLightsOutBuffer.size;
+			vk::DescriptorImageInfo albedoInfo;
+			albedoInfo.sampler = *mGBufferAttachments.sampler;
+			albedoInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			albedoInfo.imageView = *mGBufferAttachments.color.view;
 
-		vk::DescriptorImageInfo positionInfo;
-		positionInfo.sampler = *mGBufferAttachments.sampler;
-		positionInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-		positionInfo.imageView = *mGBufferAttachments.position.view;
+			vk::DescriptorImageInfo normalInfo;
+			normalInfo.sampler = *mGBufferAttachments.sampler;
+			normalInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			normalInfo.imageView = *mGBufferAttachments.normal.view;
 
-		vk::DescriptorImageInfo colorInfo;
-		colorInfo.sampler = *mGBufferAttachments.sampler;
-		colorInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-		colorInfo.imageView = *mGBufferAttachments.color.view;
-
-		vk::DescriptorImageInfo normalInfo;
-		normalInfo.sampler = *mGBufferAttachments.sampler;
-		normalInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-		normalInfo.imageView = *mGBufferAttachments.normal.view;
-
-		std::array<vk::WriteDescriptorSet, 5> writes;
-		writes[0].dstSet = targetSet;
-		writes[0].descriptorCount = 1;
-		writes[0].dstBinding = 0;
-		writes[0].descriptorType = vk::DescriptorType::eStorageBuffer;
-		writes[0].pBufferInfo = &pointLightsInfo;
-
-		writes[1].dstSet = targetSet;
-		writes[1].descriptorCount = 1;
-		writes[1].dstBinding = 1;
-		writes[1].descriptorType = vk::DescriptorType::eStorageBuffer;
-		writes[1].pBufferInfo = &lightsOutInfo;
-
-		writes[2].dstSet = targetSet;
-		writes[2].descriptorCount = 1;
-		writes[2].dstBinding = 2;
-		writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		writes[2].pImageInfo = &positionInfo;
-
-		writes[3].dstSet = targetSet;
-		writes[3].descriptorCount = 1;
-		writes[3].dstBinding = 3;
-		writes[3].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		writes[3].pImageInfo = &colorInfo;
-
-		writes[4].dstSet = targetSet;
-		writes[4].descriptorCount = 1;
-		writes[4].dstBinding = 4;
-		writes[4].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-		writes[4].pImageInfo = &normalInfo;
-
-		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
+			std::vector<vk::WriteDescriptorSet> writes;
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pointLightsInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsOutInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsIndirectionInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &positionInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &albedoInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &normalInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &depthInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pageTableInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pagePoolInfo);
+			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &uniqueClustersInfo);
+			
+			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
+		}
 	}
 
 	// debug
@@ -1394,11 +1410,6 @@ void Renderer::createSyncPrimitives()
 
 void Renderer::createComputePipeline()
 {
-	 // vk::PushConstantRange pushConstantRange;
-	 // pushConstantRange.offset = 0;
-	 // pushConstantRange.size = sizeof(PushConstantObject);
-	 // pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eCompute;
-
 	std::array<vk::DescriptorSetLayout, 2> setLayouts = { 
 		mResource.descriptorSetLayout.get("camera"),
 		mResource.descriptorSetLayout.get("lightculling")
@@ -1407,23 +1418,38 @@ void Renderer::createComputePipeline()
 	vk::PipelineLayoutCreateInfo layoutInfo;
 	layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 	layoutInfo.pSetLayouts = setLayouts.data();
-	// layoutInfo.pushConstantRangeCount = 1;
-	// layoutInfo.pPushConstantRanges = &pushConstantRange;
 
 	mResource.pipelineLayout.add("lightculling", layoutInfo);
 
-	auto shader = mResource.shaderModule.add("data/lightculling.comp");
-
 	vk::PipelineShaderStageCreateInfo stageInfo;
 	stageInfo.stage = vk::ShaderStageFlagBits::eCompute;
-	stageInfo.module = shader;
 	stageInfo.pName = "main";
 
-	vk::ComputePipelineCreateInfo pipelineInfo;
-	pipelineInfo.stage = stageInfo;
-	pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
 
-	mResource.pipeline.add("lightculling", *mPipelineCache, pipelineInfo);
+	// page flag
+	{
+		stageInfo.module = mResource.shaderModule.add("data/pageflag.comp");
+
+		vk::ComputePipelineCreateInfo pipelineInfo;
+		pipelineInfo.stage = stageInfo;
+		pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
+		pipelineInfo.basePipelineIndex = -1;
+
+		mResource.pipeline.add("pageflag", *mPipelineCache, pipelineInfo);
+	}
+
+	auto pipelineBase = mResource.pipeline.get("pageflag");
+	for (const auto& name : { "pagealloc", "pagestore", "pagecompact", "lightculling" })
+	{
+		stageInfo.module = mResource.shaderModule.add(std::string("data/" ) + name + ".comp");
+
+		vk::ComputePipelineCreateInfo pipelineInfo;
+		pipelineInfo.stage = stageInfo;
+		pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
+		pipelineInfo.basePipelineHandle = pipelineBase;
+
+		mResource.pipeline.add(name, *mPipelineCache, pipelineInfo);
+	}
 }
 
 void Renderer::createComputeCommandBuffer()
@@ -1460,18 +1486,39 @@ void Renderer::createComputeCommandBuffer()
 		// 	nullptr // pImageMemoryBarriers
 		// );
 
+		vk::MemoryBarrier barrier;
+		barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
 		std::array<vk::DescriptorSet, 2> descriptorSets{ 
 			mResource.descriptorSet.get("camera"),
 			mResource.descriptorSet.get("lightculling")
 		};
 
+		cmd.fillBuffer(*mClusteredBuffer.handle, 0, VK_WHOLE_SIZE, 0);
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion , nullptr, nullptr, nullptr);
+
+		// cmd.fillBuffer(*mClusteredBuffer.handle, mPagePoolOffset, mPagePoolSize, 0);
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
 
-		// PushConstantObject pco;
-		// cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 0, sizeof(pco), &pco);
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pageflag"));
 		cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
+
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagealloc"));
+		cmd.dispatch(1, 1, 1);
+		
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagestore"));
+		cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
+		
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagecompact"));
+		cmd.dispatch(1, 1, 1);
+		
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
+		cmd.dispatch(1, 1, 1);
 
 
 		//std::array<vk::BufferMemoryBarrier, 2> barriersAfter;
@@ -1549,7 +1596,7 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
 	mContext.getDevice().unmapMemory(*mPointLightsStagingBuffer.memory);
 
-	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mPointLightsBuffer.handle, memorySize, 0, 0); // TODO use transfer queue
+	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset); // TODO use transfer queue
 }
 
 void Renderer::drawFrame()
@@ -1595,8 +1642,6 @@ void Renderer::drawFrame()
 		// submitInfos.emplace_back(submitInfo);
 		mContext.getGraphicsQueue().submit(submitInfo, nullptr);
 	}
-	// TODO: use Fence and we can have cpu start working at a earlier time
-
 
 	if (BaseApp::getInstance().getUI().getDebugIndex() == DebugStates::disabled)
 	{

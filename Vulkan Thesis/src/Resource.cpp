@@ -31,7 +31,7 @@ vk::DescriptorSet DescriptorSet::add(const std::string& key, vk::DescriptorSetAl
 
 vk::ShaderModule ShaderModule::add(const std::string& key)
 {
-	try // TODO must done with own exception type
+	try // TODO must be done with own exception type
 	{
 		auto spirv = util::compileShader(key);
 

@@ -62,7 +62,7 @@ void UI::update()
 		TreeNode("Render texture");
 		{
 
-			const auto names = { "Default", "Albedo", "Normal", "Specular", "Position" };
+			const auto names = { "Default", "Albedo", "Normal", "Specular", "Position", "Depth" };
 
 			for (size_t i = 0; i < static_cast<size_t>(DebugStates::count); i++)
 			{

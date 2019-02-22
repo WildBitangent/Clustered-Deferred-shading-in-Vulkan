@@ -2,7 +2,10 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 #define TILE_SIZE 32 // TODO bake it with compilation or w/e
-#define MAX_TILE_LIGHTS 1024
+#define PAGE_SIZE 512
+#define NEAR 0.5
+#define FAR 100.0
+#define Y_SLICES 0.027398974188114442743140954270042618454096202801626751934
 
 // --- structs ---
 struct Light
@@ -11,12 +14,6 @@ struct Light
 	float radius;
 	vec3 intensity;
 	float pad;
-};
-
-struct VisibleLights
-{
-	uint count;
-	uint lights[MAX_TILE_LIGHTS];
 };
 
 // --- layouts ---
@@ -35,18 +32,30 @@ layout(std430, set = 1, binding = 0) buffer readonly PointLights
 	Light lights[];
 } pointLights;
 
-layout(std430, set = 1, binding = 1) buffer readonly TileLights
+layout(std430, set = 1, binding = 1) buffer readonly LightsOut
 {
-	VisibleLights visibleLights[];
-} tileLights;
+	uint count;
+	uint data[];
+} lightsOut;
 
-layout(set = 1, binding = 2) uniform sampler2D samplerposition;
-layout(set = 1, binding = 3) uniform sampler2D samplerAlbedo;
-layout(set = 1, binding = 4) uniform sampler2D samplerNormal;
+layout(set = 1, binding = 3) uniform sampler2D samplerPosition;
+layout(set = 1, binding = 4) uniform sampler2D samplerAlbedo;
+layout(set = 1, binding = 5) uniform sampler2D samplerNormal;
+layout(set = 1, binding = 6) uniform sampler2D samplerDepth;
+
+layout(std430, set = 1, binding = 7) buffer readonly pageTable
+{
+	uint counter; // todo make it 2 at start
+	uint nodes[];
+} table;
+
+layout(std430, set = 1, binding = 8) buffer readonly PagePool
+{
+	uint data[];
+} pool;
 
 layout(location = 0) in vec2 inUV;
 layout(location = 0) out vec4 outFragcolor;
-
 
 // Returns ±1
 vec2 signNotZero(vec2 v) 
@@ -63,25 +72,49 @@ vec3 oct_to_float32x3(vec2 e) {
 	return normalize(v);
 }
 
+uint addressTranslate(uint virtualAddress)
+{
+	uint pageNumber = virtualAddress / PAGE_SIZE;
+	uint pageAddress = (table.nodes[pageNumber] - 2) * PAGE_SIZE;
+	uint offset = virtualAddress % PAGE_SIZE;
+
+	return pageAddress + offset;
+}
+
+uint packKey(uvec3 key)
+{
+	return key.x | key.y << 7 | (key.z & 0x3FF) << 14;
+}
+
+float getViewDepth(float projDepth)
+{
+	float normalizedProjDepth = projDepth * 2.0 - 1.0;
+	// return 1.0 / (normalizedProjDepth * camera.invProj[2][3] + camera.invProj[3][3]);
+	return camera.proj[3][2] / (normalizedProjDepth + camera.proj[2][2]);
+}
+
+
 void main() 
 {
 	// Get G-Buffer values
-	vec3 fragPos = texture(samplerposition, inUV).rgb;
+	vec3 fragPos = texture(samplerPosition, inUV).rgb;
 	vec4 albedo = texture(samplerAlbedo, inUV);
 	vec3 normal = oct_to_float32x3(texture(samplerNormal, inUV).rg);
-	float specStrength = texture(samplerposition, inUV).a;
+	float specStrength = texture(samplerPosition, inUV).a;
 
-	uvec2 tileID = uvec2(gl_FragCoord.xy) / uvec2(TILE_SIZE, TILE_SIZE);
-	uint index = tileID.y * ((pointLights.lightCount_screenSize.y - 1) / TILE_SIZE + 1) + tileID.x;
-
+	float depth = getViewDepth(texture(samplerDepth, inUV).r);
+	uint k = uint(log(depth / NEAR) / Y_SLICES); // 72 slices along Y
+	uvec3 key = uvec3(uvec2(gl_FragCoord.xy) / uvec2(TILE_SIZE, TILE_SIZE), k);
+	uint address = addressTranslate(packKey(key));
+	uint index = pool.data[address];
 	// Ambient part
 	#define ambient 0.03
-	// #define ambient 0.3
+	// #define ambient 0.2
 	vec3 fragcolor = albedo.rgb * ambient;
 
-	for (uint i = 0; i < tileLights.visibleLights[index].count; i++)
+	for (uint i = 0; i < lightsOut.data[index]; i++)
 	{
-		uint lightIndex = tileLights.visibleLights[index].lights[i];
+		uint lightIndex = lightsOut.data[index + i + 1];
 
 		Light light = pointLights.lights[lightIndex];
 		light.position = (camera.view * vec4(light.position, 1.0)).xyz;
