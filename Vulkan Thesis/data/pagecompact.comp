@@ -46,8 +46,6 @@ void main()
 		{
 			uint index = atomicAdd(clusterCounter, 1);
 			clusterIndices[index] = i;
-			// comp.data[index] = pool.data[i];
-			// pool.data[i] = index;
 		}
 	}
 
