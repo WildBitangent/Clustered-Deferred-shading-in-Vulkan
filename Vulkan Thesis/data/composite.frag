@@ -75,7 +75,7 @@ vec3 oct_to_float32x3(vec2 e) {
 uint addressTranslate(uint virtualAddress)
 {
 	uint pageNumber = virtualAddress / PAGE_SIZE;
-	uint pageAddress = (table.nodes[pageNumber] - 2) * PAGE_SIZE;
+	uint pageAddress = (table.nodes[pageNumber] - 1) * PAGE_SIZE;
 	uint offset = virtualAddress % PAGE_SIZE;
 
 	return pageAddress + offset;

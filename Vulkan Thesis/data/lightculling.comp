@@ -117,7 +117,7 @@ bool collide(ViewFrustum frustum, vec3 position, float radius)
 uint addressTranslate(uint virtualAddress)
 {
 	uint pageNumber = virtualAddress >> PAGE_SIZE_POWER;
-	uint pageAddress = (table.nodes[pageNumber] - 2) * PAGE_SIZE;
+	uint pageAddress = (table.nodes[pageNumber] - 1) * PAGE_SIZE;
 	uint offset = virtualAddress % PAGE_SIZE;
 
 	return pageAddress + offset;

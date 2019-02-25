@@ -17,7 +17,7 @@ void main()
 	uint tid = gl_LocalInvocationIndex;
 
 	if (tid == 0)
-		counter = 2;
+		counter = 1;
 
 	barrier();
 
@@ -25,12 +25,12 @@ void main()
 	{
 		if (table.nodes[i] == 1)
 			table.nodes[i] = atomicAdd(counter, 1);
-		else
-			table.nodes[i] = 0;
+		// else
+		// 	table.nodes[i] = 0;
 	}
 
 	barrier();
 
 	if (gl_LocalInvocationIndex == 0)
-		table.pageCounter = counter - 2;
+		table.pageCounter = counter - 1;
 }

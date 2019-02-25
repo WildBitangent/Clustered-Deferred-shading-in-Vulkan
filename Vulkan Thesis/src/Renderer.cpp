@@ -1518,7 +1518,7 @@ void Renderer::createComputeCommandBuffer()
 		
 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
-		cmd.dispatch(5, 1, 1);
+		cmd.dispatch(10, 1, 1);
 
 
 		//std::array<vk::BufferMemoryBarrier, 2> barriersAfter;
