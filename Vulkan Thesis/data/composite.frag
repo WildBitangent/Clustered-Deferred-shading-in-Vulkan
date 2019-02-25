@@ -5,7 +5,7 @@
 #define PAGE_SIZE 512
 #define NEAR 0.5
 #define FAR 100.0
-#define Y_SLICES 0.027398974188114442743140954270042618454096202801626751934
+#define Y_SLICES 0.083381608939051058394765834642179160608822393696599701826
 
 // --- structs ---
 struct Light
@@ -108,8 +108,8 @@ void main()
 	uint address = addressTranslate(packKey(key));
 	uint index = pool.data[address];
 	// Ambient part
-	#define ambient 0.03
-	// #define ambient 0.2
+	// #define ambient 0.03
+	#define ambient 0.2
 	vec3 fragcolor = albedo.rgb * ambient;
 
 	for (uint i = 0; i < lightsOut.data[index]; i++)

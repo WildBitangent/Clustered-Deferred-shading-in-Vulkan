@@ -49,11 +49,10 @@ void BaseApp::run()
 			mRenderer.requestDraw(1.f);
 			// mRenderer.cleanUp();
 		}
-		// else
-		// {
-		// 	mRenderer.requestDraw(1.f);
-		// 	mRenderer.cleanUp();
-		// }
+		else
+		{
+			mRenderer.requestDraw(1.f);
+		}
 		
 	}
 
