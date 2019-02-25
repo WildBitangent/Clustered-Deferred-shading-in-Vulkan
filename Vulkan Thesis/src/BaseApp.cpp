@@ -46,10 +46,10 @@ void BaseApp::run()
 
 			mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
 			mRenderer.updateLights(mLights);
-			mRenderer.requestDraw(1.f);
+			// mRenderer.requestDraw(1.f);
 			// mRenderer.cleanUp();
 		}
-		else
+		// else
 		{
 			mRenderer.requestDraw(1.f);
 		}
