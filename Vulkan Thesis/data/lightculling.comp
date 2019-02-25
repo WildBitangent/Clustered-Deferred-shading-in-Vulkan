@@ -18,7 +18,7 @@ struct Light
 
 struct ViewFrustum
 {
-	vec3 plane[6];
+	vec3 plane[4];
 	float near;
 	float far;
 };
@@ -67,15 +67,8 @@ ViewFrustum createFrustum(uvec3 clusterID)
 {
 	ViewFrustum frustum;
 
-	// frustum.near = -exp(clusterID.z * Y_SLICES) * 0.5;
-	// frustum.far = -exp((clusterID.z + 1) * Y_SLICES) * 0.5;
-	// frustum.near = ( -frustum.near * (100.0 + 0.5) / (100.0 - 0.5) - 2 * 100.0 * 0.5 / (100.0 - 0.5) ) / -frustum.near;
-	// frustum.far = ( -frustum.far * (100.0 + 0.5) / (100.0 - 0.5) - 2 * 100.0 * 0.5 / (100.0 - 0.5) ) / -frustum.far;
-
 	frustum.near = (1.0 / (exp(clusterID.z * Y_SLICES) * 0.5) - 2) / -1.99;
 	frustum.far = (1.0 / (exp((clusterID.z + 1) * Y_SLICES) * 0.5) - 2) / -1.99;
-	// frustum.near = 2.0 * frustum.near - 1.0;
-	// frustum.far = 2.0 * frustum.far - 1.0;
 	
 	uvec2 tileCount = (lightCount_screenSize.yz - 1) / TILE_SIZE + 1;
 	uvec2 tileID = clusterID.xy;
@@ -102,12 +95,6 @@ ViewFrustum createFrustum(uvec3 clusterID)
 	frustum.far = frustumPoints[0].z;
 	frustum.near = frustumPoints[4].z;
 
-	// near
-	frustum.plane[4] = normalize(cross(frustumPoints[3].xyz - frustumPoints[0].xyz, frustumPoints[1].xyz - frustumPoints[0].xyz));
-
-	// far
-	frustum.plane[5] = normalize(cross(frustumPoints[5].xyz - frustumPoints[4].xyz, frustumPoints[7].xyz - frustumPoints[4].xyz));
-
 	return frustum;
 }
 
@@ -115,20 +102,14 @@ bool collide(ViewFrustum frustum, vec3 position, float radius)
 {
 	for (uint i = 0; i < 4; i++)
 	{
-		// float distance = dot(frustum.plane[i], position) + radius;
-
-		// if (distance <= 0.0)
-		// 	return false;
 		float distance = dot(frustum.plane[i], position);
 
 		if (distance > radius)
 			return false;
 	}
+
 	if (position.z < frustum.near - radius || position.z > frustum.far + radius)
 		return false;
-
-	// if (position.z > frustum.far + radius)
-	// 	return false;
 
 	return true;
 }
@@ -142,8 +123,6 @@ uint addressTranslate(uint virtualAddress)
 	return pageAddress + offset;
 }
 
-shared uint lightIndices[12288];
-
 layout(local_size_x = 128) in;
 void main()
 {
@@ -155,13 +134,14 @@ void main()
 		ViewFrustum frustum = createFrustum(uvec3(key & 0x7F, (key >> 7) & 0x7F, key >> 14));
 
 		uint lightCount = 0;
+		uint lightIndices[500];
 
 		for (uint x = 0; x < lightCount_screenSize.x; x++)
 		{
 			vec3 position = (camera.view * vec4(lightsIn[x].position, 1.0)).xyz;
 			if (collide(frustum, position, lightsIn[x].radius))
 			{
-				lightIndices[tid * 96 + lightCount++] = x;
+				lightIndices[lightCount++] = x;
 			}				
 		}
 
@@ -182,7 +162,7 @@ void main()
 			lightsOut.lights[index++] = lightCount;
 			
 			for (uint x = 0; x < lightCount; x++)
-				lightsOut.lights[index + x] = lightIndices[tid * 96 + x];
+				lightsOut.lights[index + x] = lightIndices[x];
 		}
 		else
 			pool.data[addressTranslate(key)] = 0; // point to dummy
