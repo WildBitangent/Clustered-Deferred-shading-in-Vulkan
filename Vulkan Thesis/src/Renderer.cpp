@@ -2,6 +2,7 @@
 
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
+#include <algorithm> 
 
 #include "Context.h"
 #include "Model.h"
@@ -1031,8 +1032,7 @@ void Renderer::createLights()
 {
 	constexpr vk::DeviceSize lightsOutSize = sizeof(uint32_t) * (MAX_LIGHTS_PER_TILE + 1) * TILE_COUNT_X * TILE_COUNT_Y; // ... + 1 => storing light counter for tile
 	constexpr vk::DeviceSize pointLightsSize = sizeof(PointLight) * MAX_POINTLIGHTS/* + sizeof(glm::vec4)*/; // ... + size of LightParams struct
-	constexpr vk::DeviceSize indirectionSize = TILE_COUNT_X * TILE_COUNT_Y * sizeof(uint32_t)/* + sizeof(uint32_t)*/; // ... + global light counter
-
+	constexpr vk::DeviceSize indirectionSize = pointLightsSize; // swap buffer
 	mLightsOutOffset = 0;
 	mPointLightsOffset = lightsOutSize;
 	mLightsIndirectionOffset = mPointLightsOffset + pointLightsSize;
@@ -1052,7 +1052,7 @@ void Renderer::createLights()
 
 	mLightsBuffers = mUtility.createBuffer(
 		bufferSize,
-		vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+		vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 }
@@ -1145,8 +1145,8 @@ void Renderer::createDescriptorSets()
 
 		vk::DescriptorBufferInfo lightsIndirectionInfo;
 		lightsIndirectionInfo.buffer = *mLightsBuffers.handle;
-		lightsIndirectionInfo.offset = mLightsIndirectionSize;
-		lightsIndirectionInfo.range = mLightsIndirectionOffset;
+		lightsIndirectionInfo.offset = mLightsIndirectionOffset;
+		lightsIndirectionInfo.range = mLightsIndirectionSize;
 
 		vk::DescriptorBufferInfo pageTableInfo;
 		pageTableInfo.buffer = *mClusteredBuffer.handle;
@@ -1175,7 +1175,7 @@ void Renderer::createDescriptorSets()
 			allocInfo.descriptorSetCount = 1;
 			allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
 
-			auto targetSet = mResource.descriptorSet.add("lightculling", allocInfo);
+			auto targetSet = mResource.descriptorSet.add("lightculling_01", allocInfo);
 
 			std::vector<vk::WriteDescriptorSet> writes;
 			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pointLightsInfo);
@@ -1186,6 +1186,15 @@ void Renderer::createDescriptorSets()
 			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pagePoolInfo);
 			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &uniqueClustersInfo);
 
+			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
+
+			// swapped light buffers
+			targetSet = mResource.descriptorSet.add("lightculling_10", allocInfo);
+			for (auto& item : writes)
+				item.dstSet = targetSet;
+
+			std::swap(writes[0].dstBinding, writes[2].dstBinding);
+		
 			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 		}
 
@@ -1269,7 +1278,10 @@ void Renderer::createGraphicsCommandBuffers()
 
 		auto& cmd = *mGBufferCommandBuffer;
 
-		cmd.begin(vk::CommandBufferBeginInfo{});
+		vk::CommandBufferBeginInfo beginInfo;
+		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
+
+		cmd.begin(beginInfo);
 
 		vk::RenderPassBeginInfo renderpassInfo;
 		renderpassInfo.renderPass = *mGBufferRenderpass;
@@ -1439,7 +1451,7 @@ void Renderer::createComputePipeline()
 	}
 
 	auto pipelineBase = mResource.pipeline.get("pageflag");
-	for (const auto& name : { "pagealloc", "pagestore", "pagecompact", "lightculling" })
+	for (const auto& name : { "pagealloc", "pagestore", "pagecompact", "lightculling", "sort_merge256", "sort_splitterSort2_8", "sort_mergeSeq" })
 	{
 		stageInfo.module = mResource.shaderModule.add(std::string("data/" ) + name + ".comp");
 
@@ -1457,103 +1469,74 @@ void Renderer::createComputeCommandBuffer()
 	// Create command buffer
 	{
 		vk::CommandBufferAllocateInfo allocInfo;
-		allocInfo.commandPool = mContext.getStaticCommandPool();
+		allocInfo.commandPool = mContext.getDynamicCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
-		allocInfo.commandBufferCount = 1;
+		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
 
-		mLightCullingCommandBuffer = std::move(mContext.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
+		mPrimaryLightCullingCommandBuffer = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+
+		allocInfo.level = vk::CommandBufferLevel::eSecondary;
+		allocInfo.commandPool = mContext.getStaticCommandPool();
+		allocInfo.commandBufferCount = 2;
+		mSecondaryLightCullingCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
 	}
 
 	// Record command buffer
 	{
-		auto& cmd = *mLightCullingCommandBuffer;
-
-		cmd.begin(vk::CommandBufferBeginInfo{});
-
-		// TODO Barries might be needed when updating lights inbetween rendering
-		//  std::array<vk::BufferMemoryBarrier, 2> barriersBefore;
-		//  barriersBefore[0].srcAccessMask = vk::AccessFlagBits::eShaderRead;
-		//  barriersBefore[0].dstAccessMask = vk::AccessFlagBits::eShaderWrite;
-		//  barriersBefore[0].buffer = *mLightsOutBuffer.handle;
-		//  barriersBefore[0].size = mLightsOutBuffer.size;
-		//
-		// cmd.pipelineBarrier(
-		// 	vk::PipelineStageFlagBits::eFragmentShader,  // srcStageMask
-		// 	vk::PipelineStageFlagBits::eComputeShader,  // dstStageMask
-		// 	vk::DependencyFlags(),  // dependencyFlags
-		// 	nullptr,  // pBUfferMemoryBarriers
-		// 	barriersBefore,  // pBUfferMemoryBarriers
-		// 	nullptr // pImageMemoryBarriers
-		// );
-
 		vk::MemoryBarrier barrier;
 		barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
 		std::array<vk::DescriptorSet, 2> descriptorSets{ 
 			mResource.descriptorSet.get("camera"),
-			mResource.descriptorSet.get("lightculling")
+			mResource.descriptorSet.get("lightculling_01")
 		};
 
-		cmd.fillBuffer(*mClusteredBuffer.handle, 0, VK_WHOLE_SIZE, 0);
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion , nullptr, nullptr, nullptr);
+		vk::CommandBufferInheritanceInfo inheritanceInfo;
 
-		// cmd.fillBuffer(*mClusteredBuffer.handle, mPagePoolOffset, mPagePoolSize, 0);
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
-
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pageflag"));
-		cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
-
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagealloc"));
-		cmd.dispatch(1, 1, 1);
+		vk::CommandBufferBeginInfo beginInfo;
+		beginInfo.pInheritanceInfo = &inheritanceInfo;
+		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 		
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagestore"));
-		cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
-		
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagecompact"));
-		cmd.dispatch(40, 1, 1);
-		
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
-		cmd.dispatch(30, 1, 1);
+		{
+			auto& cmd = *mSecondaryLightCullingCommandBuffers[0];
+			cmd.begin(beginInfo);
 
+				cmd.fillBuffer(*mClusteredBuffer.handle, 0, VK_WHOLE_SIZE, 0);
+				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion , nullptr, nullptr, nullptr);
 
-		//std::array<vk::BufferMemoryBarrier, 2> barriersAfter;
-		//barriersAfter[0] = 
-		//barriersAfter.emplace_back
-		//(
-		//	vk::AccessFlagBits::eShaderWrite,  // srcAccessMask
-		//	vk::AccessFlagBits::eShaderRead,  // dstAccessMask
-		//	0,//static_cast<uint32_t>(queue_family_indices.compute_family), // srcQueueFamilyIndex
-		//	0,//static_cast<uint32_t>(queue_family_indices.graphics_family),  // dstQueueFamilyIndex
-		//	static_cast<vk::Buffer>(light_visibility_buffer.get()),  // buffer
-		//	0,  // offset
-		//	light_visibility_buffer_size  // size
-		//);
-		//barriersAfter.emplace_back
-		//(
-		//	vk::AccessFlagBits::eShaderWrite,  // srcAccessMask 
-		//	vk::AccessFlagBits::eShaderRead,  // dstAccessMask
-		//	0, //static_cast<uint32_t>(queue_family_indices.compute_family), // srcQueueFamilyIndex
-		//	0, //static_cast<uint32_t>(queue_family_indices.graphics_family),  // dstQueueFamilyIndex
-		//	static_cast<vk::Buffer>(pointlight_buffer.get()),  // buffer
-		//	0,  // offset
-		//	pointlight_buffer_size  // size
-		//);
+				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
 
-		//cmd.pipelineBarrier(
-		//	vk::PipelineStageFlagBits::eComputeShader,
-		//	vk::PipelineStageFlagBits::eFragmentShader,
-		//	vk::DependencyFlags(),
-		//	0, nullptr,
-		//	static_cast<uint32_t>(barriersAfter.size()), barriersAfter.data(),
-		//	0, nullptr
-		//);
+				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pageflag"));
+				cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
 
-		cmd.end();
+				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagealloc"));
+				cmd.dispatch(1, 1, 1);
+				
+				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagestore"));
+				cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
+				
+				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagecompact"));
+				cmd.dispatch(40, 1, 1);
+
+			cmd.end();
+		}
+
+		{
+			auto &cmd = *mSecondaryLightCullingCommandBuffers[1];
+			cmd.begin(beginInfo);
+
+				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
+
+				// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
+				cmd.dispatch(30, 1, 1);
+
+			cmd.end();
+		}
 	}
 }
 
@@ -1588,15 +1571,16 @@ void Renderer::updateUniformBuffers()
 
 void Renderer::updateLights(const std::vector<PointLight>& lights)
 {	
-	auto lightsCount = BaseApp::getInstance().getUI().mContext.lightsCount;
-	auto memorySize = sizeof(PointLight) * lightsCount + sizeof(glm::vec4);
+	mLightsCount = BaseApp::getInstance().getUI().mContext.lightsCount;
+	auto memorySize = sizeof(PointLight) * mLightsCount + sizeof(glm::vec4);
 	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize));
 
-	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(lightsCount), {WIDTH, HEIGHT} };
+	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {WIDTH, HEIGHT} };
 	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
 	mContext.getDevice().unmapMemory(*mPointLightsStagingBuffer.memory);
 
 	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset); // TODO use transfer queue
+	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, sizeof(glm::vec4), 0, mLightsIndirectionOffset); // TODO use transfer queue
 }
 
 void Renderer::drawFrame()
@@ -1647,6 +1631,98 @@ void Renderer::drawFrame()
 	{
 		// submit light culling
 		{
+			auto& cmd = *mPrimaryLightCullingCommandBuffer[imageIndex];
+			
+			// build light culling cmd
+			{
+
+				std::array<vk::DescriptorSet, 2> descriptorSets{ 
+			mResource.descriptorSet.get("camera"),
+			mResource.descriptorSet.get("lightculling_01")
+				};
+
+				vk::MemoryBarrier barrier;
+				barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+				barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+
+				// record 
+				cmd.begin(vk::CommandBufferBeginInfo{});
+				cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[0]);
+				
+				// light sorting
+				{
+					size_t lightWindowsCount = (255 + mLightsCount) >> 8;
+
+					cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
+					
+					cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_merge256"));
+					cmd.dispatch(lightWindowsCount, 1, 1);
+					cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+
+					if (mLightsCount > 256)
+					{
+						// todo remove this
+						// cmd.fillBuffer(*mLightsBuffers.handle, mLightsIndirectionOffset, mLightsIndirectionSize, 0);
+						// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+
+						std::string mLightBufferSwapUsed = "lightculling_01";
+						for (size_t i = lightWindowsCount; i > 1; i = (i + 1) >> 1) 
+						{
+							cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
+
+							cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_splitterSort2_8"));
+							cmd.dispatch(1, 1, 1);
+							cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+
+							cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_mergeSeq"));
+							cmd.dispatch((lightWindowsCount + 1) >> 1, 1, 1);
+
+							if (i > 2 || mLightBufferSwapUsed == "lightculling_01")
+								cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+							
+							mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
+						}
+
+						if (mLightBufferSwapUsed == "lightculling_10")
+						{
+							vk::DeviceSize size = (mLightsCount + 1) * sizeof(PointLight) - sizeof(glm::vec4);
+
+							vk::BufferCopy copy;
+							copy.srcOffset = mLightsIndirectionOffset + sizeof(glm::vec4);
+							copy.dstOffset = mPointLightsOffset + sizeof(glm::vec4);
+							copy.size = size;
+
+							vk::BufferMemoryBarrier barrier;
+							barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+							barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+							barrier.size = size;
+							barrier.offset = mLightsIndirectionOffset + sizeof(glm::vec4);
+							barrier.buffer = *mLightsBuffers.handle;
+
+							cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
+							cmd.copyBuffer(*mLightsBuffers.handle, *mLightsBuffers.handle, copy);
+
+							barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+							barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+							barrier.offset = mPointLightsOffset + sizeof(glm::vec4);
+
+							cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
+							
+
+							// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+						}
+					}
+
+
+
+					// cmd.dispatch(1, 1, 1);
+					// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				}
+
+				cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[1]);
+				cmd.end();
+			}
 			vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eComputeShader;
 
 			vk::SubmitInfo submitInfo;
@@ -1654,7 +1730,7 @@ void Renderer::drawFrame()
 			submitInfo.pWaitSemaphores = &*mGBufferFinishedSemaphore;
 			submitInfo.pWaitDstStageMask = &waitStages;
 			submitInfo.commandBufferCount = 1;
-			submitInfo.pCommandBuffers = &*mLightCullingCommandBuffer;
+			submitInfo.pCommandBuffers = &cmd;
 			submitInfo.signalSemaphoreCount = 1;
 			submitInfo.pSignalSemaphores = &*mLightCullingFinishedSemaphore;
 

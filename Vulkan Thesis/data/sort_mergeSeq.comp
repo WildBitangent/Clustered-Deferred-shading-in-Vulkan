@@ -1,0 +1,148 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+
+#define LOCAL_SIZE 256
+
+// ------------- STRUCTS -------------
+struct Light
+{
+	vec3 position;
+	float radius;
+	vec3 intensity;
+	float pad;
+};
+
+struct Key
+{
+	uint mortonCode;
+	uint lightIndex;
+};
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 1) buffer Splitter
+{
+	// Key kyes[];
+	Key data[];
+} splitters;
+
+layout(std430, set = 1, binding = 2) buffer Swap
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light data[];
+} swap;
+
+shared uint mortons[LOCAL_SIZE * 2];
+shared uint indices[LOCAL_SIZE * 2];
+
+#include "sort_util.comp"
+
+uint binarySearch(uint length)
+// {
+// 	uint iKey = mortons[a];
+// 	uint pos = 0;
+
+// 	for (uint inc = 128; inc > 0; inc >>= 1)
+// 	{
+// 		uint j = b + pos;
+// 		uint jKey = mortons[j];
+
+// 		bool smaller = (jKey < iKey) || (jKey == iKey && j < gl_LocalInvocationIndex);
+// 		pos += (smaller) ? inc : 0;
+// 		// pos = min(pos, length);
+// 	}
+// }
+// {
+// 	uint L = 0; // start at the middle
+// 	uint R = 255;
+// 	uint m;
+// 	for (uint i = 0; i < 8; i++)
+// 	{
+// 		m = (L + R) >> 1;
+// 		if (mortons[a] <= mortons[b + m])
+// 			L = m + 1;
+// 		else
+// 			R = m - 1;
+// 	}
+
+// 	return m;
+// }
+
+{
+	uint pos = 0;
+	uint iKey = mortons[a];
+	for (uint i = 0; i < length; i++)
+	{
+		uint jKey = mortons[b + i];
+		pos = (iKey > jKey) ? i : pos;
+	}
+
+	return pos;
+}
+
+
+layout(local_size_x = LOCAL_SIZE) in;
+void main()
+{
+	uint tid = gl_LocalInvocationIndex;
+
+	uint ai = splitters.data[gl_WorkGroupID.x].lightIndex;
+	uint bi = splitters.data[gl_WorkGroupID.x + 1].lightIndex;
+
+	Light lightA = lightsIn[tid + ai];
+	Light lightB = lightsIn[tid + bi];
+
+	uint mortonA = (ai + tid < lightCount_screenSize.x) ? morton3D(lightA.position) : ~0;
+	uint mortonB = (bi + tid < lightCount_screenSize.x) ? morton3D(lightB.position) : ~0;
+
+	mortons[tid] = mortonA;
+	// indices[tid] = (gl_WorkGroupID.x << 9) + tid;
+
+	mortons[tid + LOCAL_SIZE] = mortonB;
+	// indices[tid + LOCAL_SIZE] = (gl_WorkGroupID.x << 9) + LOCAL_SIZE + tid;
+
+	barrier();
+
+	uint pos = 0;
+	uint iKey = mortonA;
+
+	for (uint i = 0; i < LOCAL_SIZE; i++)
+	{
+		uint jKey = mortons[LOCAL_SIZE + i];
+		pos = (iKey > jKey) ? pos + 1 : pos;
+	}
+
+	uint aidx = tid + pos;
+
+	pos = 0;
+	iKey = mortonB;
+	for (uint i = 0; i < LOCAL_SIZE; i++)
+	{
+		uint jKey = mortons[i];
+		pos = (iKey >= jKey) ? pos + 1 : pos;
+	}
+
+	uint bidx = tid + pos;
+
+	// uint aidx = tid + binarySearch(tid, LOCAL_SIZE);
+	// uint bidx = tid + binarySearch(tid + LOCAL_SIZE, 0);
+
+	swap.data[aidx + (gl_WorkGroupID.x << 9)] = lightA;
+	swap.data[bidx + (gl_WorkGroupID.x << 9)] = lightB;
+
+	if (gl_GlobalInvocationID.x == 0) // TODO fill through vkCmd
+	{
+		// prepare lights out for next dispatch
+		// lightsOut.lights[0] = 0; // used as dummy for cluster without light
+		// lightsOut.count = 1;
+		splitters.data[0].mortonCode = 1;
+		splitters.data[0].lightIndex = 0;
+	}
+}

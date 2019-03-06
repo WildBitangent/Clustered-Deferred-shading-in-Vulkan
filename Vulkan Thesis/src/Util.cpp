@@ -118,7 +118,13 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	EShMessages messages = (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules);
 	std::string preprocessedGLSL;
 	if (!shader.preprocess(&defaultTBuiltInResource, 110, ENoProfile, false, false, messages, &preprocessedGLSL, includer))
-		throw std::runtime_error("Failed to preprocess file: " + filename);
+	{
+		std::string log = "Failed to preprocess file: " + filename + "\n";
+		log += shader.getInfoLog();		//TODO make LOGGER
+		log += shader.getInfoDebugLog();
+
+		throw std::runtime_error(log);
+	}
 	// TODO LOG
 
 	const char* preprocessedCstr = preprocessedGLSL.c_str();

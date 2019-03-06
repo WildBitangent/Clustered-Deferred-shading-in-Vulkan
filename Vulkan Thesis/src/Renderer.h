@@ -68,7 +68,8 @@ private:
 	// command buffers
 	std::vector<vk::UniqueCommandBuffer> mPrimaryCompositionCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mCompositionCommandBuffers;
-	vk::UniqueCommandBuffer mLightCullingCommandBuffer;
+	std::vector<vk::UniqueCommandBuffer> mPrimaryLightCullingCommandBuffer;
+	std::vector<vk::UniqueCommandBuffer> mSecondaryLightCullingCommandBuffers;
 	vk::UniqueCommandBuffer mGBufferCommandBuffer;
 	std::vector<vk::UniqueCommandBuffer> mPrimaryDebugCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffers;
@@ -118,6 +119,8 @@ private:
 	vk::DeviceSize mPageTableSize;
 	vk::DeviceSize mPagePoolSize;
 	vk::DeviceSize mUniqueClustersSize;
+
+	size_t mLightsCount; // for sorting
 
 	friend class UI;
 };

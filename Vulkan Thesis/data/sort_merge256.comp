@@ -1,0 +1,76 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+
+#define LOCAL_SIZE 256
+
+// ------------- STRUCTS -------------
+struct Light
+{
+	vec3 position;
+	float radius;
+	vec3 intensity;
+	uint mortonCode;
+};
+
+struct Key
+{
+	uint mortonCode;
+	uint lightIndex;
+};
+
+// ------------- LAYOUTS -------------
+layout(set = 0, binding = 0) uniform CameraUBO
+{
+	mat4 view;
+	mat4 proj;
+	mat4 invProj;
+	vec3 position;
+} camera;
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+shared uint mortons[LOCAL_SIZE];
+shared uint indices[LOCAL_SIZE];
+
+#include "sort_util.comp"
+
+
+layout(local_size_x = LOCAL_SIZE) in;
+void main()
+{
+	// uint tid = gl_LocalInvocationIndex;
+	// Light light = lightsIn[gl_GlobalInvocationID.x];
+
+	// mortons[tid] = 255 - tid;
+	// indices[tid] = gl_GlobalInvocationID.x;
+	// light.pad = uintBitsToFloat(mortons[tid]);
+	// barrier();
+
+	// mergeSort();
+
+	// // write sorted list
+	// lightsIn[indices[tid]] = light; 
+
+	uint tid = gl_LocalInvocationIndex;
+
+	Light light = lightsIn[gl_GlobalInvocationID.x];
+	uint mortonCode = (gl_GlobalInvocationID.x < lightCount_screenSize.x) ? morton3D(light.position) : ~0;
+	// uint mortonCode = (tid * 2 < 256) ? tid * 2 : 256 - ((tid - 128) * 2 + 1);
+	light.mortonCode = mortonCode;
+
+	mortons[tid] = mortonCode;
+	indices[tid] = tid;
+
+	barrier();
+
+	mergeSort(gl_GlobalInvocationID.x);
+
+	// write sorted list
+	lightsIn[indices[tid]] = light; 
+}

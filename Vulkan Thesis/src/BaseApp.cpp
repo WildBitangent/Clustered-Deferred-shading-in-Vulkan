@@ -30,7 +30,7 @@ void BaseApp::run()
 
 		glfwPollEvents();
 
-		if (deltaTime > 1.0f / 60.0f)
+		// if (deltaTime > 1.0f / 60.0f)
 		{
 			tick(deltaTime);
 			startTime = current;
@@ -46,13 +46,13 @@ void BaseApp::run()
 
 			mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
 			mRenderer.updateLights(mLights);
-			// mRenderer.requestDraw(1.f);
+			mRenderer.requestDraw(1.f);
 			// mRenderer.cleanUp();
 		}
 		// else
-		{
-			mRenderer.requestDraw(1.f);
-		}
+		// {
+		// 	mRenderer.requestDraw(1.f);
+		// }
 		
 	}
 
