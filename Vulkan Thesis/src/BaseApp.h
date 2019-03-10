@@ -58,8 +58,11 @@ private:
 	std::vector<glm::vec3> mLightsDirections;
 	std::vector<float> mSpeeds;
 
+	bool mFirstMouse = true;
 	glm::vec2 mCursorPos = { 0, 0 };
 	glm::vec2 mPrevCursorPos = { 0,0 };
+	float mPitch = 0.0f;
+	float mYaw = 0.0f;
 
 	bool mRMBDown = false;
 	bool mLMBDown = false;

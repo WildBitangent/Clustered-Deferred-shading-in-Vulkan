@@ -31,7 +31,7 @@
     <ProjectGuid>{b31f3afb-51f2-4ce1-bd43-e96f9369482a}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>Vulkan_Thesis</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -103,8 +103,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>D:\Vulkan SDKs\1.1.101.0\Include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Vulkan SDKs\1.1.101.0\Lib;D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -114,13 +114,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\VulkanSDK\1.1.77.0\Include;D:\VulkanSDK\GLFW\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\VulkanSDK\1.1.77.0\Lib;D:\VulkanSDK\GLFW\lib_x64;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>D:\VulkanSDK\1.1.97.0\Include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\VulkanSDK\GLFW\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\VulkanSDK\1.1.97.0\Lib;D:\VulkanSDK\GLFW\lib_x64;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebug|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.82.1\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.82.1\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\1.1.101.0\Include;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\1.1.101.0\Lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>

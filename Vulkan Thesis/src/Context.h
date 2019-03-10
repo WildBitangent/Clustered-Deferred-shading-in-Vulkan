@@ -6,11 +6,14 @@ struct GLFWwindow;
 
 struct QueueFamilyIndices
 {
-	int graphicsFamily = -1;
-	int presentFamily = -1;
+	std::pair<int, int> graphicsFamily = {-1, -1};
+	std::pair<int, int> presentFamily = {-1, -1};
+	std::pair<int, int> computeFamily = {-1, -1};
 
-	bool isComplete();
-	bool isSingleQueue();
+	bool sharedComputeGraphics = false;
+
+	bool isComplete() const;
+	bool isSingleQueue() const;
 	static QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice device, vk::SurfaceKHR surface);
 };
 
@@ -91,6 +94,7 @@ private:
 	GLFWwindow*				mWindow;
 
 	vk::UniqueInstance		mInstance;
+	// vk::UniqueDebugUtilsMessengerEXT		mMessenger;
 	UniqueMessengerDLD		mMessenger;
 	vk::UniqueDevice		mDevice;
 	vk::UniqueSurfaceKHR	mSurface;

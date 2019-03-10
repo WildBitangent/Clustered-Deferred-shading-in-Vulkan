@@ -153,15 +153,15 @@ void BaseApp::tick(float dt)
 	if (mRMBDown)
 	{
 		auto cursorDelta = (mCursorPos - mPrevCursorPos) / glm::vec2(glm::min(1024, 726) * 2.0f);
-
-		if (!util::isNearlyEqual(cursorDelta.x, 0))
+	
+		if (!util::isNearlyEqual(cursorDelta.x, 0, 1e-5))
 			mCamera.rotation = glm::angleAxis(mCamera.rotationSpeed * -cursorDelta.x, glm::vec3(0.0f, 1.0f, 0.0f)) * mCamera.rotation;
-
-		if (!util::isNearlyEqual(cursorDelta.y, 0))
+	
+		if (!util::isNearlyEqual(cursorDelta.y, 0, 1e-5))
 			mCamera.rotation = mCamera.rotation * glm::angleAxis(mCamera.rotationSpeed * -cursorDelta.y, glm::vec3(1.0f, 0.0f, 0.0f));
-
+	
 		mCamera.rotation = glm::normalize(mCamera.rotation);
-
+	
 		mPrevCursorPos = mCursorPos;
 	}
 
@@ -203,13 +203,14 @@ void BaseApp::onMouseButton(int button, int action, int mods)
 {
 	if (action == GLFW_PRESS) 
 	{
-		double x, y;
-		glfwGetCursorPos(mWindow, &x, &y);
-		mCursorPos = { x, y };
+		// double x, y;
+		// glfwGetCursorPos(mWindow, &x, &y);
+		// mCursorPos = { x, y };
 
 		if (button == GLFW_MOUSE_BUTTON_RIGHT)
 		{
 			mRMBDown = true;
+			mFirstMouse = true;
 			glfwSetInputMode(mWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		}
 		else if (button == GLFW_MOUSE_BUTTON_LEFT)
@@ -314,11 +315,14 @@ void BaseApp::onKeyPress(int key, int scancode, int action, int mods)
 
 void BaseApp::onCursorPosChange(double xPos, double yPos)
 {
-	if (!mLMBDown && !mRMBDown)
-		return;
+	if (mRMBDown)
+	{
+		mCursorPos = { xPos, yPos };
 
-	if (mLMBDown) 
-		mCursorPos = { xPos, yPos };
-	else if (mRMBDown) 
-		mCursorPos = { xPos, yPos };
+		if(mFirstMouse)
+	    {
+			mPrevCursorPos = mCursorPos;
+			mFirstMouse = false;
+	    }
+	}
 }

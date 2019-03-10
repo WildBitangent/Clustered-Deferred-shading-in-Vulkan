@@ -126,14 +126,14 @@ namespace
 }
 
 
-bool QueueFamilyIndices::isComplete()
+bool QueueFamilyIndices::isComplete() const
 {
-	return graphicsFamily >= 0 && presentFamily >= 0;
+	return graphicsFamily.first >= 0 && presentFamily.first >= 0 && (computeFamily.first >= 0 || sharedComputeGraphics);
 }
 
-bool QueueFamilyIndices::isSingleQueue()
+bool QueueFamilyIndices::isSingleQueue() const 
 {
-	return graphicsFamily == presentFamily;
+	return graphicsFamily.first == presentFamily.first == computeFamily.first;
 }
 
 QueueFamilyIndices QueueFamilyIndices::findQueueFamilies(vk::PhysicalDevice device, vk::SurfaceKHR surface)
@@ -142,23 +142,46 @@ QueueFamilyIndices QueueFamilyIndices::findQueueFamilies(vk::PhysicalDevice devi
 
 	auto queueFamilies = device.getQueueFamilyProperties();
 
-	for (size_t i = 0; i < queueFamilies.size() && !indices.isComplete(); i++)
+	for (int i = 0; i < static_cast<int>(queueFamilies.size()) && !indices.isComplete(); i++)
 	{
-		if (queueFamilies[i].queueCount > 0 && (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics))
-		{
-			auto supportCompute = queueFamilies[i].queueFlags & vk::QueueFlagBits::eCompute;
-			auto enoughSize = queueFamilies[i].queueCount >= 2;
+		int queueCount = 0;
+		if (indices.graphicsFamily.first < 0 && queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
+			indices.graphicsFamily = {i, queueCount++};
 
-			if (supportCompute && enoughSize)
-				indices.graphicsFamily = static_cast<int>(i);
-		}
+		if (indices.computeFamily.first < 0 && queueFamilies[i].queueFlags & vk::QueueFlagBits::eCompute)
+			indices.computeFamily = {i, 0};
 
-		if (queueFamilies[i].queueCount > 0 && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
-			indices.presentFamily = static_cast<int>(i);
-
-		if (indices.isComplete())
-			break;
+		if (indices.presentFamily.first < 0 && queueFamilies[i].queueCount > queueCount && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
+			indices.presentFamily = {i, queueCount};
 	}
+
+	// for (int i = 0; i < static_cast<int>(queueFamilies.size()) && !indices.isComplete(); i++)
+	// {
+	// 	size_t queuesUsed = 0;
+	// 	const auto supportCompute = queueFamilies[i].queueFlags & vk::QueueFlagBits::eCompute;
+	//
+	// 	if (queueFamilies[i].queueCount > 0 && (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics))
+	// 	{
+	// 		const auto enoughSize = queueFamilies[i].queueCount >= 2;
+	//
+	// 		if (supportCompute && enoughSize)
+	// 		{
+	// 			indices.sharedComputeGraphics = true;
+	// 			indices.graphicsFamily = {i, queuesUsed++};
+	// 			indices.computeFamily = {i, queuesUsed++};
+	// 		}
+	// 		
+	// 		// take first graphics queue, but try to find shared compute queue
+	// 		if (indices.graphicsFamily.first < 0)
+	// 			indices.graphicsFamily = {i, queuesUsed++};
+	// 	}
+	//
+	// 	if (indices.computeFamily.first < 0 && supportCompute && indices.graphicsFamily.first != i)
+	// 		indices.computeFamily = {i, queuesUsed++};
+	//
+	// 	if (indices.presentFamily.first < 0 && queueFamilies[i].queueCount > queuesUsed && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
+	// 		indices.presentFamily = {i, queuesUsed};
+	// }
 
 	return indices;
 }
@@ -255,7 +278,8 @@ void Context::setupDebugCallback()
 	createInfo.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
 	createInfo.pfnUserCallback = debugCallback;
 
-	static auto dldi = vk::DispatchLoaderDynamic(*mInstance); //TODO ain't nobody got time for that
+	// static auto dldi = vk::DispatchLoaderDynamic(*mInstance); //TODO ain't nobody got time for that
+	static auto dldi = vk::DispatchLoaderDynamic(*mInstance, reinterpret_cast<PFN_vkGetInstanceProcAddr>(mInstance->getProcAddr("vkGetInstanceProcAddr"))); //TODO ain't nobody got time for that
 
 	mMessenger = mInstance->createDebugUtilsMessengerEXTUnique(createInfo, nullptr, dldi);
 #endif
@@ -310,19 +334,28 @@ void Context::createLogicalDevice()
 
 	std::vector<int> queueFamilies;
 	std::vector<std::vector<float>> queuePriorities;
+		
+	std::vector<std::pair<int, int>> items = {mQueueFamilyIndices.graphicsFamily, mQueueFamilyIndices.computeFamily, mQueueFamilyIndices.presentFamily};
 
-
-	if (mQueueFamilyIndices.isSingleQueue())
+	for (int i = 0; i < 4; i++) // I doubt it will span over more queues // todo refactor this
 	{
-		queueFamilies = { mQueueFamilyIndices.graphicsFamily };
-		queuePriorities = { { 1.0f, 1.0f, 1.0f } };
+		std::vector<float> priorities;
+		for (const auto& item : items)
+		{
+			if (item.first == i)
+			{
+				if (item.second >= priorities.size())
+					priorities.emplace_back(1.0f);
+			}
+		}
+	
+		if (!priorities.empty())
+		{
+			queueFamilies.emplace_back(i);
+			queuePriorities.emplace_back(std::move(priorities));
+		}
 	}
-	else
-	{
-		queueFamilies = { mQueueFamilyIndices.graphicsFamily, mQueueFamilyIndices.presentFamily };
-		queuePriorities = { { 1.0f, 1.0f },{ 1.0f } }; // 2 queues in graphics family, 1 used for compute
-	}
-
+		
 	for (size_t i = 0; i < queueFamilies.size(); i++)
 	{
 		vk::DeviceQueueCreateInfo info;
@@ -353,19 +386,21 @@ void Context::createLogicalDevice()
 
 	mDevice = mPhysicalDevice.createDeviceUnique(deviceInfo);
 
-	mGraphicsQueue = mDevice->getQueue(mQueueFamilyIndices.graphicsFamily, 0);
-	mComputeQueue = mDevice->getQueue(mQueueFamilyIndices.graphicsFamily, 1);
+	mGraphicsQueue = mDevice->getQueue(mQueueFamilyIndices.graphicsFamily.first, mQueueFamilyIndices.graphicsFamily.second);
+	mComputeQueue = mDevice->getQueue(mQueueFamilyIndices.computeFamily.first, mQueueFamilyIndices.computeFamily.second);
+	mPresentQueue = mDevice->getQueue(mQueueFamilyIndices.presentFamily.first, mQueueFamilyIndices.presentFamily.second);
 
-	if (mQueueFamilyIndices.isSingleQueue())
-		mPresentQueue = mDevice->getQueue(mQueueFamilyIndices.graphicsFamily, 2);
-	else
-		mPresentQueue = mDevice->getQueue(mQueueFamilyIndices.presentFamily, 0);
+	// mComputeQueue = mGraphicsQueue;
+	// mPresentQueue = mGraphicsQueue;
+	//
+	// mQueueFamilyIndices.computeFamily = mQueueFamilyIndices.graphicsFamily;
+	// mQueueFamilyIndices.presentFamily = mQueueFamilyIndices.graphicsFamily;
 }
 
 void Context::createCommandPools()
 {
 	vk::CommandPoolCreateInfo poolInfo;
-	poolInfo.queueFamilyIndex = mQueueFamilyIndices.graphicsFamily;
+	poolInfo.queueFamilyIndex = mQueueFamilyIndices.graphicsFamily.first;
 
 	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 	mStaticCommandPool = mDevice->createCommandPoolUnique(poolInfo);

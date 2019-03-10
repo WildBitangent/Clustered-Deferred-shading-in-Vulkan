@@ -193,6 +193,10 @@ vk::SurfaceFormatKHR Utility::chooseSwapSurfaceFormat(const std::vector<vk::Surf
 vk::PresentModeKHR Utility::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& availableModes)
 {
 	for (const auto& mode : availableModes)
+		if (mode == vk::PresentModeKHR::eImmediate)
+			return mode;
+
+	for (const auto& mode : availableModes)
 		if (mode == vk::PresentModeKHR::eMailbox)
 			return mode;
 
@@ -460,7 +464,7 @@ void Utility::recordTransitImageLayout(vk::CommandBuffer cmdBuffer, vk::Image im
 	vk::ImageMemoryBarrier barrier;
 	barrier.oldLayout = oldLayout;
 	barrier.newLayout = newLayout;
-	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;  //TODO: when converting the depth attachment for depth pre pass this is not correct
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.image = image;
 
