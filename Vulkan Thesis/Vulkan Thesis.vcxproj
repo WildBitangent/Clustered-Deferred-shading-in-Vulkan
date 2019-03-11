@@ -249,6 +249,7 @@
       </ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\Resource.cpp" />
+    <ClCompile Include="src\ThreadPool.cpp" />
     <ClCompile Include="src\UI.cpp" />
     <ClCompile Include="src\Util.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -262,6 +263,7 @@
     <ClInclude Include="src\Model.h" />
     <ClInclude Include="src\Renderer.h" />
     <ClInclude Include="src\Resource.h" />
+    <ClInclude Include="src\ThreadPool.h" />
     <ClInclude Include="src\tiny_obj_loader.h" />
     <ClInclude Include="src\UI.h" />
     <ClInclude Include="src\Util.h" />

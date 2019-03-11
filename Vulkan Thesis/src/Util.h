@@ -14,6 +14,20 @@ struct BufferParameters
 	size_t size;
 };
 
+struct BufferSection
+{
+	BufferSection() = default;
+	BufferSection(vk::Buffer handle, vk::DeviceSize offset, vk::DeviceSize size)
+		: handle(handle)
+		, offset(offset)
+		, size(size)
+	{}
+
+	vk::Buffer handle;
+	vk::DeviceSize offset = 0;
+	vk::DeviceSize size = 0;
+};
+
 struct ImageParameters
 {
 	vk::UniqueImage handle;
@@ -33,10 +47,6 @@ struct GBuffer
 
 namespace util
 {
-	vk::VertexInputBindingDescription getVertexBindingDesciption();
-	std::array<vk::VertexInputAttributeDescription, 5> getVertexAttributeDescriptions();
-	std::vector<uint32_t> compileShader(const std::string& filename);
-
 	struct Vertex
 	{
 		glm::vec3 pos;
@@ -62,9 +72,15 @@ namespace util
 	{
 		// vk::WriteDescriptorSet writeDescriptorSet(vk::DescriptorSet target, )
 	}
+
+	vk::VertexInputBindingDescription getVertexBindingDesciption();
+	std::array<vk::VertexInputAttributeDescription, 5> getVertexAttributeDescriptions();
+	std::vector<uint32_t> compileShader(const std::string& filename);
+	vk::WriteDescriptorSet createDescriptorWriteBuffer(vk::DescriptorSet target, uint32_t binding, vk::DescriptorType type, vk::DescriptorBufferInfo& bufferInfo);
+	vk::WriteDescriptorSet createDescriptorWriteImage(vk::DescriptorSet target, uint32_t binding, vk::DescriptorImageInfo& imageInfo);
 }
 
-class Utility
+class Utility // TODO make it singleton (all functions in namespace using singleton, who owns device context etc.)
 {
 public:
 	Utility(const Context& context);
@@ -82,7 +98,7 @@ public:
 	void transitImageLayout(vk::Image image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
 	vk::UniqueImageView createImageView(vk::Image image, vk::Format format, vk::ImageAspectFlags flags);
 
-	ImageParameters loadImageFromFile(std::string path);
+	std::vector<unsigned char> loadImageFromFile(std::string path) const;
 	ImageParameters loadImageFromMemory(std::vector<uint8_t> pixels, size_t width, size_t height);
 
 	vk::CommandBuffer beginSingleTimeCommands();

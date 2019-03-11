@@ -5,26 +5,15 @@
 #include "Context.h"
 #include "Util.h"
 #include "Resource.h"
-
-struct BufferSection
-{
-	BufferSection() = default;
-	BufferSection(vk::Buffer handle, vk::DeviceSize offset, vk::DeviceSize size)
-		: handle(handle)
-		, offset(offset)
-		, size(size)
-	{}
-
-	vk::Buffer handle;
-	vk::DeviceSize offset = 0;
-	vk::DeviceSize size = 0;
-};
+#include <queue>
+#include <mutex>
+#include <atomic>
 
 struct MeshPart
 {
 	BufferSection vertexBufferSection;
 	BufferSection indexBufferSection;
-	BufferSection materialUniformSection;
+	// BufferSection materialUniformSection;
 
 	std::string materialDescriptorSetKey = "material.";
 
@@ -45,6 +34,30 @@ struct MeshPart
 	{}
 };
 
+struct MeshMaterialGroup // grouped by material
+{
+	std::vector<util::Vertex> vertices;
+	std::vector<uint32_t> indices;
+
+	std::string albedoMapPath;
+	std::string normalMapPath;
+	std::string specularMapPath;
+};
+
+struct WorkerStruct
+{
+	WorkerStruct(Utility& utility) : utility(utility) {}
+	std::vector<MeshMaterialGroup> groups;
+
+	Utility& utility;
+	uint8_t* data;
+
+	BufferParameters stagingBuffer;
+	std::mutex mutex;
+	std::atomic<vk::DeviceSize> stagingBufferOffset = 0;
+	std::atomic<vk::DeviceSize> VIBufferOffset = 0;
+};
+
 class Model
 {
 public:
@@ -56,11 +69,14 @@ public:
 	Model(Model&& model) = default;
 	Model& operator=(Model&& model) = default;
 
-	void loadModel(const Context& context, const std::string& path, const vk::Sampler& textureSampler,
+	void loadModel(Context& context, const std::string& path, const vk::Sampler& textureSampler,
 		const vk::DescriptorPool& descriptorPool, resource::Resources& resources); // TODO: refactor
 
 	const std::vector<MeshPart>& getMeshParts() const;
 
+private:
+	void threadWork(vk::CommandBuffer cmd, WorkerStruct& work);
+	
 private:
 	std::vector<MeshPart> mParts;
 

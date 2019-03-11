@@ -6,6 +6,9 @@
 
 #include <fstream>
 #include <experimental/filesystem>
+#include <thread>
+#include "lodepng.h"
+#include <iostream>
 
 using namespace resource;
 
@@ -24,16 +27,6 @@ namespace std
 namespace 
 {
 	namespace fs = std::experimental::filesystem;
-
-	struct MeshMaterialGroup // grouped by material
-	{
-		std::vector<util::Vertex> vertices;
-		std::vector<uint32_t> indices;
-
-		std::string albedoMapPath;
-		std::string normalMapPath;
-		std::string specularMapPath;
-	};
 
 	struct MaterialUBO
 	{
@@ -242,11 +235,11 @@ namespace
 	}
 }
 
-void Model::loadModel(const Context& context, const std::string& path, const vk::Sampler& textureSampler,
+void Model::loadModel(Context& context, const std::string& path, const vk::Sampler& textureSampler,
 	const vk::DescriptorPool& descriptorPool, Resources& resources)
 {
 	auto device = context.getDevice();
-	Utility utility{ context };
+	Utility utility(context);
 
 	// load proxy texture
 	mImages.emplace_back(utility.loadImageFromMemory({ 0, 0, 0, 0 }, 1, 1)); 
@@ -269,199 +262,257 @@ void Model::loadModel(const Context& context, const std::string& path, const vk:
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 
-	vk::DeviceSize currentOffset = 0;
-	for (const auto& group : groups)
-	{
-		if (group.indices.size() <= 0)
-			continue;
+	WorkerStruct work(utility);
+	work.groups = std::move(groups);
+	work.stagingBuffer = utility.createBuffer( // TODO mb smaller with multiple submits
+		256 * 1024 * 1024, // 256 MB
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	work.data = static_cast<uint8_t*>(device.mapMemory(*work.stagingBuffer.memory, 0, VK_WHOLE_SIZE, {}));
+	
+	// create cmd buffers
+	vk::CommandBufferAllocateInfo allocInfo;
+	allocInfo.commandPool = context.getDynamicCommandPool();
+	allocInfo.level = vk::CommandBufferLevel::ePrimary;
+	allocInfo.commandBufferCount = 1;
+	vk::UniqueCommandBuffer cmd = std::move(context.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
 
-		vk::DeviceSize vertexSectionSize = sizeof(util::Vertex) * group.vertices.size();
-		vk::DeviceSize indexSectionSize = sizeof(uint32_t) * group.indices.size();
+	// spawn workers and wait for finish
+	context.getThreadPool().addWorkMultiplex([this, &work](vk::CommandBuffer& cmd) { threadWork(cmd, work); });
+	context.getThreadPool().wait();
 
-		// copy vertex data
-		BufferSection vertexBufferSection = { *mBuffer.handle, currentOffset, vertexSectionSize };
-		{
-			BufferParameters stagingBuffer = utility.createBuffer(
-				vertexSectionSize,
-				vk::BufferUsageFlagBits::eTransferSrc,
-				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-			);
+	// retrieve command buffers
+	auto cmdBuffersUnique = context.getThreadPool().getCommandBuffers();
+	std::vector<vk::CommandBuffer> cmdBuffers;
+	for (auto& cmd : cmdBuffersUnique)
+		cmdBuffers.emplace_back(*cmd);
 
-			void* data = device.mapMemory(*stagingBuffer.memory, 0, stagingBuffer.size, {});
-			memcpy(data, group.vertices.data(), static_cast<size_t>(stagingBuffer.size));
-			device.unmapMemory(*stagingBuffer.memory);
+	// execute all cmd buffers
+	cmd->begin(vk::CommandBufferBeginInfo());
+	cmd->executeCommands(cmdBuffers);
 
-			utility.copyBuffer(*stagingBuffer.handle, *mBuffer.handle, stagingBuffer.size, 0, currentOffset);
-
-			currentOffset += stagingBuffer.size;
-		}
-
-		// copy index data
-		BufferSection indexBufferSection = { *mBuffer.handle, currentOffset, indexSectionSize };
-		{
-			BufferParameters stagingBuffer = utility.createBuffer(
-				indexSectionSize,
-				vk::BufferUsageFlagBits::eTransferSrc,
-				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-			);
-
-			void* data = device.mapMemory(*stagingBuffer.memory, 0, stagingBuffer.size, {});
-			memcpy(data, group.indices.data(), stagingBuffer.size);
-			device.unmapMemory(*stagingBuffer.memory);
-
-			utility.copyBuffer(*stagingBuffer.handle, *mBuffer.handle, stagingBuffer.size, 0, currentOffset);
-
-			currentOffset += stagingBuffer.size;
-		}
-
-		MeshPart part(vertexBufferSection, indexBufferSection, group.indices.size());
-
-		if (!group.albedoMapPath.empty())
-		{
-			mImages.emplace_back(utility.loadImageFromFile(group.albedoMapPath));
-			part.albedoMap = *mImages.back().view;
-			part.hasAlbedo = true;
-		}
-		else
-			part.albedoMap = *mImages[0].view;
-
-		if (!group.normalMapPath.empty())
-		{
-			mImages.emplace_back(utility.loadImageFromFile(group.normalMapPath));
-			part.normalMap = *mImages.back().view;
-			part.hasNormal = true;
-		}
-		else
-			part.normalMap = *mImages[0].view;
-
-		if (!group.specularMapPath.empty())
-		{
-			mImages.emplace_back(utility.loadImageFromFile(group.specularMapPath));
-			part.specularMap = *mImages.back().view;
-			part.hasSpecular = true;
-		}
-		else
-			part.specularMap = *mImages[0].view;
-
-		mParts.emplace_back(part);
-	}
-
-	auto createMaterialDescriptorSet = 
-		[&utility, &device, &textureSampler, &descriptorPool, &resources, &memory = *mUniformBuffer.memory]
-		(MeshPart& part, BufferSection uniformBufferSection)
-	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &resources.descriptorSetLayout.get("material");
-
-		auto targetSet = resources.descriptorSet.add(part.materialDescriptorSetKey, allocInfo);
-		MaterialUBO ubo;
-
-		std::vector<vk::WriteDescriptorSet> descriptorWrites;
-
-		// refer to the uniform object buffer
-		vk::DescriptorBufferInfo uniformBufferInfo;
-		{
-			uniformBufferInfo.buffer = uniformBufferSection.handle;
-			uniformBufferInfo.offset = uniformBufferSection.offset;
-			uniformBufferInfo.range = uniformBufferSection.size;
-
-			vk::WriteDescriptorSet writeDescriptor;
-			writeDescriptor.dstSet = targetSet;
-			writeDescriptor.dstBinding = 0;
-			writeDescriptor.descriptorCount = 1;
-			writeDescriptor.descriptorType = vk::DescriptorType::eUniformBuffer;
-			writeDescriptor.pBufferInfo = &uniformBufferInfo;
-
-			descriptorWrites.emplace_back(writeDescriptor);
-		}
-
-		vk::DescriptorImageInfo albedoMapInfo;
-		
-		{
-			ubo.hasAlbedoMap = part.hasAlbedo;
-			albedoMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			albedoMapInfo.imageView = part.albedoMap;
-			albedoMapInfo.sampler = textureSampler;
-
-			vk::WriteDescriptorSet writeDescriptor;
-			writeDescriptor.dstSet = targetSet;
-			writeDescriptor.dstBinding = 1;
-			writeDescriptor.descriptorCount = 1;
-			writeDescriptor.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-			writeDescriptor.pImageInfo = &albedoMapInfo;
-
-			descriptorWrites.emplace_back(writeDescriptor);
-		}
-
-		vk::DescriptorImageInfo normalmapInfo;
-		{
-			ubo.hasNormalMap = part.hasNormal;
-			normalmapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			normalmapInfo.imageView = part.normalMap;
-			normalmapInfo.sampler = textureSampler;
-
-			vk::WriteDescriptorSet writeDescriptor;
-			writeDescriptor.dstSet = targetSet;
-			writeDescriptor.dstBinding = 2;
-			writeDescriptor.descriptorCount = 1;
-			writeDescriptor.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-			writeDescriptor.pImageInfo = &normalmapInfo;
-
-			descriptorWrites.emplace_back(writeDescriptor);
-		}
-
-		vk::DescriptorImageInfo specularmapInfo;
-		{
-			ubo.hasSpecularMap = part.hasSpecular;
-			specularmapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			specularmapInfo.imageView = part.specularMap;
-			specularmapInfo.sampler = textureSampler;
-
-			vk::WriteDescriptorSet writeDescriptor;
-			writeDescriptor.dstSet = targetSet;
-			writeDescriptor.dstBinding = 3;
-			writeDescriptor.descriptorCount = 1;
-			writeDescriptor.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-			writeDescriptor.pImageInfo = &specularmapInfo;
-
-			descriptorWrites.emplace_back(writeDescriptor);
-		}
-
-		device.updateDescriptorSets(descriptorWrites, {});
-		
-		BufferParameters stagingBuffer = utility.createBuffer(
-			uniformBufferSection.size,
-			vk::BufferUsageFlagBits::eTransferSrc,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-		);
-
-		void* data = device.mapMemory(*stagingBuffer.memory, 0, stagingBuffer.size, {});
-		memcpy(data, &ubo, stagingBuffer.size);
-		device.unmapMemory(*stagingBuffer.memory);
-
-		utility.copyBuffer(*stagingBuffer.handle, uniformBufferInfo.buffer, stagingBuffer.size, 0, uniformBufferInfo.offset);
-	};
-
-
+	// decide min alignment for unform buffers
 	auto minAlignment = context.getPhysicalDevice().getProperties().limits.minUniformBufferOffsetAlignment;
 	vk::DeviceSize alignmentOffset = ((sizeof(MaterialUBO) - 1) / minAlignment + 1) * minAlignment;
 
+	// create uniforms buffer
 	mUniformBuffer = utility.createBuffer(
 		alignmentOffset * mParts.size(),
 		vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eUniformBuffer,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 
-	vk::DeviceSize totalOffset = 0;
+	// create and update descriptor sets
+	vk::DeviceSize currentOffset = work.stagingBufferOffset;
+	vk::DeviceSize uniformStartOffset = currentOffset;
+	std::vector<vk::WriteDescriptorSet> descriptorWrites;
+	std::vector<vk::DescriptorBufferInfo> bufferInfos(mParts.size());
+	std::vector<vk::DescriptorImageInfo> imageInfos(mParts.size() * 3);
 	size_t counter = 0;
-	for (auto& part : mParts)
+
+	for (size_t i = 0; i < mParts.size(); i++)
 	{
+		auto& part = mParts[i];
+
 		part.materialDescriptorSetKey += std::to_string(counter++); // TODO sigh, refactor this shit
-		createMaterialDescriptorSet(part, { *mUniformBuffer.handle, totalOffset, sizeof(MaterialUBO) });
-		totalOffset += alignmentOffset;
+		
+		vk::DescriptorSetAllocateInfo allocInfo;
+		allocInfo.descriptorPool = descriptorPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &resources.descriptorSetLayout.get("material");
+
+		const auto targetSet = resources.descriptorSet.add(part.materialDescriptorSetKey, allocInfo);
+		MaterialUBO ubo;
+
+		bufferInfos[i] = vk::DescriptorBufferInfo(*mUniformBuffer.handle, currentOffset - uniformStartOffset, alignmentOffset);
+		imageInfos[i * 3] = vk::DescriptorImageInfo(textureSampler, part.albedoMap, vk::ImageLayout::eShaderReadOnlyOptimal); 
+		imageInfos[i * 3 + 1] = vk::DescriptorImageInfo(textureSampler, part.normalMap, vk::ImageLayout::eShaderReadOnlyOptimal); 
+		imageInfos[i * 3 + 2] = vk::DescriptorImageInfo(textureSampler, part.specularMap, vk::ImageLayout::eShaderReadOnlyOptimal); 
+
+		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, bufferInfos[i]));
+		descriptorWrites.emplace_back(util::createDescriptorWriteImage(targetSet, 1, imageInfos[i * 3]));
+		descriptorWrites.emplace_back(util::createDescriptorWriteImage(targetSet, 2, imageInfos[i * 3 + 1]));
+		descriptorWrites.emplace_back(util::createDescriptorWriteImage(targetSet, 3, imageInfos[i * 3 + 2]));
+
+		ubo.hasAlbedoMap = part.hasAlbedo;
+		ubo.hasNormalMap = part.hasNormal;
+		ubo.hasSpecularMap = part.hasSpecular;
+
+		memcpy(work.data + currentOffset, &ubo, sizeof(MaterialUBO));
+		currentOffset += alignmentOffset;
 	}
+
+	utility.recordCopyBuffer(
+		*cmd, 
+		*work.stagingBuffer.handle,
+		*mUniformBuffer.handle,
+		alignmentOffset * mParts.size(),
+		uniformStartOffset
+	);
+
+	cmd->end();
+
+	device.unmapMemory(*work.stagingBuffer.memory);
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &*cmd;
+
+	context.getGraphicsQueue().submit(submitInfo, nullptr);
+	context.getGraphicsQueue().waitIdle(); // todo mb use fences or semaphores? +1
+
+	device.updateDescriptorSets(descriptorWrites, {});
+}
+
+void Model::threadWork(vk::CommandBuffer cmd, WorkerStruct& work)
+{
+	// begin cmd buffer
+	vk::CommandBufferInheritanceInfo inheritanceInfo;
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.pInheritanceInfo = &inheritanceInfo;
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	cmd.begin(beginInfo);
+
+	while (true) // break condition below
+	{
+		MeshMaterialGroup group;
+
+		// get work item
+		{
+			std::lock_guard<std::mutex> lock(work.mutex);
+
+			if (!work.groups.empty())
+			{
+				group = std::move(work.groups.back());
+				work.groups.pop_back();
+			}
+			else // nothing to be done, finish
+				break;
+		}
+		
+		if (group.indices.empty())
+			continue;
+
+		vk::DeviceSize vertexSectionSize = sizeof(util::Vertex) * group.vertices.size();
+		vk::DeviceSize indexSectionSize = sizeof(uint32_t) * group.indices.size();
+
+		vk::DeviceSize stagingOffset = std::atomic_fetch_add(&work.stagingBufferOffset, vertexSectionSize + indexSectionSize);
+		vk::DeviceSize VIOffset = std::atomic_fetch_add(&work.VIBufferOffset, vertexSectionSize + indexSectionSize);
+
+		// copy vertex data
+		BufferSection vertexBufferSection = { *mBuffer.handle, VIOffset, vertexSectionSize };
+		{
+			memcpy(work.data + stagingOffset, group.vertices.data(), static_cast<size_t>(vertexSectionSize));
+
+			work.utility.recordCopyBuffer(
+				cmd, 
+				*work.stagingBuffer.handle,
+				*mBuffer.handle,
+				vertexSectionSize,
+				stagingOffset,
+				VIOffset
+			);
+
+			stagingOffset += vertexSectionSize;
+			VIOffset += vertexSectionSize;
+		}
+
+		// copy index data
+		BufferSection indexBufferSection = { *mBuffer.handle, VIOffset, indexSectionSize };
+		{
+			memcpy(work.data + stagingOffset, group.indices.data(), indexSectionSize);
+			
+			work.utility.recordCopyBuffer(
+				cmd,
+				*work.stagingBuffer.handle,
+				*mBuffer.handle,
+				indexSectionSize,
+				stagingOffset,
+				VIOffset
+			);
+		}
+
+		MeshPart part(vertexBufferSection, indexBufferSection, group.indices.size());
+
+		auto loadImg = [&work, &cmd](const std::string& path)
+		{
+			// load img from file
+			unsigned width, height;
+			std::vector<unsigned char> pixels;
+
+			if (lodepng::decode(pixels, width, height, path))
+				throw std::runtime_error("Failed to load png file: " + path);
+
+			// copy it to the staging buffer // todo copy less
+			const auto startOffset = std::atomic_fetch_add(&work.stagingBufferOffset, pixels.size()); 
+			memcpy(work.data + startOffset, pixels.data(), pixels.size());
+
+			auto image = work.utility.createImage(
+				width, height,
+				vk::Format::eR8G8B8A8Unorm,
+				vk::ImageTiling::eOptimal,
+				vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+				vk::MemoryPropertyFlagBits::eDeviceLocal
+			);
+
+			work.utility.recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+			work.utility.recordCopyBuffer(cmd, *work.stagingBuffer.handle, *image.handle, width, height, startOffset);
+			work.utility.recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+			
+			image.view = work.utility.createImageView(*image.handle, vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
+
+			return image;
+		};
+
+		if (!group.albedoMapPath.empty())
+		{
+			auto image = loadImg(group.albedoMapPath);
+
+			// lock for insterting to the mImages
+			std::lock_guard<std::mutex> lock(work.mutex);
+			
+			part.albedoMap = *image.view;
+			part.hasAlbedo = true;
+			mImages.emplace_back(std::move(image));
+		}
+		else
+			part.albedoMap = *mImages[0].view; // todo possibly sigseg on realloc?
+
+		if (!group.normalMapPath.empty())
+		{
+			auto image = loadImg(group.normalMapPath);
+
+			// lock for insterting to the mImages
+			std::lock_guard<std::mutex> lock(work.mutex);
+			
+			part.normalMap = *image.view;
+			part.hasNormal = true;
+			mImages.emplace_back(std::move(image));
+		}
+		else
+			part.normalMap = *mImages[0].view;
+
+		if (!group.specularMapPath.empty())
+		{
+			auto image = loadImg(group.specularMapPath);
+
+			// lock for insterting to the mImages
+			std::lock_guard<std::mutex> lock(work.mutex);
+			
+			part.specularMap = *image.view;
+			part.hasSpecular = true;
+			mImages.emplace_back(std::move(image));
+		}
+		else
+			part.specularMap = *mImages[0].view;
+		
+		std::lock_guard<std::mutex> lock(work.mutex);
+		mParts.emplace_back(part);
+	}
+
+	cmd.end();
 }
 
 const std::vector<MeshPart>& Model::getMeshParts() const

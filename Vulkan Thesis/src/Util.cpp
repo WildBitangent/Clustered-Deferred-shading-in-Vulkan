@@ -171,6 +171,32 @@ size_t util::Vertex::hash() const
 	return seed;
 }
 
+
+
+vk::WriteDescriptorSet util::createDescriptorWriteBuffer(vk::DescriptorSet target, uint32_t binding, vk::DescriptorType type, vk::DescriptorBufferInfo& bufferInfo)
+{
+	vk::WriteDescriptorSet writeDescriptor;
+	writeDescriptor.dstSet = target;
+	writeDescriptor.dstBinding = binding;
+	writeDescriptor.descriptorCount = 1;
+	writeDescriptor.descriptorType = type;
+	writeDescriptor.pBufferInfo = &bufferInfo;
+
+	return writeDescriptor;
+}
+
+vk::WriteDescriptorSet util::createDescriptorWriteImage(vk::DescriptorSet target, uint32_t binding, vk::DescriptorImageInfo& imageInfo)
+{
+	vk::WriteDescriptorSet writeDescriptor;
+	writeDescriptor.dstSet = target;
+	writeDescriptor.dstBinding = binding;
+	writeDescriptor.descriptorCount = 1;
+	writeDescriptor.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	writeDescriptor.pImageInfo = &imageInfo;
+
+	return writeDescriptor;
+}
+
 Utility::Utility(const Context& context)
 	: mContext(context)
 {
@@ -331,7 +357,7 @@ vk::UniqueImageView Utility::createImageView(vk::Image image, vk::Format format,
 	return mContext.getDevice().createImageViewUnique(viewInfo);
 }
 
-ImageParameters Utility::loadImageFromFile(std::string path)
+std::vector<unsigned char> Utility::loadImageFromFile(std::string path) const
 {
 	// load image file
 	unsigned width, height;
@@ -340,7 +366,7 @@ ImageParameters Utility::loadImageFromFile(std::string path)
 	if (lodepng::decode(pixels, width, height, path))
 		throw std::runtime_error("Failed to load png file: " + path);
 
-	return loadImageFromMemory(pixels, width, height);
+	return pixels;
 }
 
 ImageParameters Utility::loadImageFromMemory(std::vector<uint8_t> pixels, size_t width, size_t height)
@@ -429,7 +455,7 @@ void Utility::recordCopyBuffer(vk::CommandBuffer cmdBuffer, vk::Buffer src, vk::
 	subresource.layerCount = 1;
 
 	vk::BufferImageCopy region;
-	region.bufferOffset = 0;
+	region.bufferOffset = srcOffset;
 	region.imageSubresource = subresource;
 	region.imageOffset = vk::Offset3D(0, 0, 0);
 	region.imageExtent = vk::Extent3D(width, height, 1);
@@ -478,7 +504,7 @@ void Utility::recordTransitImageLayout(vk::CommandBuffer cmdBuffer, vk::Image im
 	barrier.subresourceRange.baseArrayLayer = 0;
 	barrier.subresourceRange.layerCount = 1;
 
-	vk::PipelineStageFlags srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
+	vk::PipelineStageFlags srcStage = vk::PipelineStageFlagBits::eHost;
 	vk::PipelineStageFlags dstStage = vk::PipelineStageFlagBits::eTopOfPipe;
 
 	//if (oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferSrcOptimal)

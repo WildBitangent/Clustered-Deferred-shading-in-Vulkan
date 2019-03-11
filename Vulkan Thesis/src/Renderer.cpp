@@ -1111,24 +1111,17 @@ void Renderer::createDescriptorSets()
 		allocInfo.descriptorPool = *mDescriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("camera");
-
-		auto targetSet = mResource.descriptorSet.add("camera", allocInfo);
-
-		// refer to the uniform object buffer
+	
 		vk::DescriptorBufferInfo bufferInfo;
 		bufferInfo.buffer = *mCameraUniformBuffer.handle;
 		bufferInfo.offset = 0;
 		bufferInfo.range = sizeof(CameraUBO);
 
-		vk::WriteDescriptorSet writes;
-		writes.dstSet = targetSet;
-		writes.dstBinding = 0;
-		writes.dstArrayElement = 0;
-		writes.descriptorType = vk::DescriptorType::eUniformBuffer;
-		writes.descriptorCount = 1;
-		writes.pBufferInfo = &bufferInfo;
+		auto targetSet = mResource.descriptorSet.add("camera", allocInfo);
 
-		descriptorWrites.emplace_back(writes);
+		// refer to the uniform object buffer
+		auto write = util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, bufferInfo);
+		descriptorWrites.emplace_back(write);
 	}
 
 	// Model
@@ -1138,22 +1131,14 @@ void Renderer::createDescriptorSets()
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("model");
 
-		auto targetSet = mResource.descriptorSet.add("model", allocInfo);
-
 		vk::DescriptorBufferInfo bufferInfo;
 		bufferInfo.buffer = *mObjectUniformBuffer.handle;
 		bufferInfo.offset = 0;
 		bufferInfo.range = sizeof(ObjectUBO);
-		
-		vk::WriteDescriptorSet writes;
-		writes.dstSet = targetSet;
-		writes.dstBinding = 0;
-		writes.dstArrayElement = 0;
-		writes.descriptorType = vk::DescriptorType::eUniformBuffer;
-		writes.descriptorCount = 1;
-		writes.pBufferInfo = &bufferInfo;
 
-		descriptorWrites.emplace_back(writes);
+		const auto targetSet = mResource.descriptorSet.add("model", allocInfo);
+
+		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, bufferInfo));
 	}
 
 	{
@@ -1202,13 +1187,15 @@ void Renderer::createDescriptorSets()
 			auto targetSet = mResource.descriptorSet.add("lightculling_01", allocInfo);
 
 			std::vector<vk::WriteDescriptorSet> writes;
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pointLightsInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsOutInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsIndirectionInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &depthInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pageTableInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pagePoolInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &uniqueClustersInfo);
+
+			uint32_t binding = 0;
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pointLightsInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsOutInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsIndirectionInfo));
+			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, depthInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pageTableInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pagePoolInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, uniqueClustersInfo));
 
 			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 
@@ -1247,16 +1234,18 @@ void Renderer::createDescriptorSets()
 			normalInfo.imageView = *mGBufferAttachments.normal.view;
 
 			std::vector<vk::WriteDescriptorSet> writes;
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pointLightsInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsOutInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &lightsIndirectionInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &positionInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &albedoInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &normalInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eCombinedImageSampler, &depthInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pageTableInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &pagePoolInfo);
-			writes.emplace_back(targetSet, writes.size(), 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &uniqueClustersInfo);
+
+			uint32_t binding = 0;
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pointLightsInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsOutInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsIndirectionInfo));
+			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, positionInfo));
+			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, albedoInfo));
+			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, normalInfo));
+			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, depthInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pageTableInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pagePoolInfo));
+			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, uniqueClustersInfo));
 			
 			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 		}
@@ -1269,21 +1258,14 @@ void Renderer::createDescriptorSets()
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("debug");
 
-		auto targetSet = mResource.descriptorSet.add("debug", allocInfo);
-
 		vk::DescriptorBufferInfo uboInfo;
 		uboInfo.buffer = *mDebugUniformBuffer.handle;
 		uboInfo.offset = 0;
 		uboInfo.range = mDebugUniformBuffer.size;
 
-		vk::WriteDescriptorSet write;
-		write.dstSet = targetSet;
-		write.descriptorCount = 1;
-		write.dstBinding = 0;
-		write.descriptorType = vk::DescriptorType::eUniformBuffer;
-		write.pBufferInfo = &uboInfo;
+		auto targetSet = mResource.descriptorSet.add("debug", allocInfo);
 		
-		descriptorWrites.emplace_back(write);
+		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, uboInfo));
 	}
 
 	mContext.getDevice().updateDescriptorSets(descriptorWrites, nullptr);
