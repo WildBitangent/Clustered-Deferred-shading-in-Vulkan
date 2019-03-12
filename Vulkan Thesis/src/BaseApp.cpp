@@ -9,6 +9,7 @@
 #include "Util.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
+#include <random>
 
 
 BaseApp& BaseApp::getInstance()
@@ -30,29 +31,29 @@ void BaseApp::run()
 
 		glfwPollEvents();
 
-		// if (deltaTime > 1.0f / 60.0f)
+		if (deltaTime > 1.0f / 60.0f)
 		{
 			tick(deltaTime);
 			startTime = current;
-
-
-			ImGui_ImplGlfw_NewFrame();
-			ImGui::NewFrame();
-
-			mUI.update();
-
-			ImGui::Render();
-			mUI.recordCommandBuffer();
-
+			
 			mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
 			mRenderer.updateLights(mLights);
-			mRenderer.requestDraw(1.f);
 			// mRenderer.cleanUp();
 		}
 		// else
 		// {
 		// 	mRenderer.requestDraw(1.f);
 		// }
+	
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
+		mUI.update();
+
+		ImGui::Render();
+		mUI.recordCommandBuffer();
+
+		mRenderer.requestDraw(1.f);
 		
 	}
 
@@ -132,19 +133,25 @@ GLFWwindow* BaseApp::createWindow()
 	return window;
 }
 
-#define randVec3 glm::normalize(glm::vec3(rand() - RAND_MAX / 2, rand() - RAND_MAX / 2, rand() - RAND_MAX / 2))
-
 void BaseApp::tick(float dt)
 {
-	auto lightsUpdate = [this](size_t offset, size_t size)
+	auto randVec3 = []()
+	{
+		static thread_local std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
+		static thread_local std::minstd_rand generator(reinterpret_cast<unsigned>(&distribution));
+
+		return glm::vec3(distribution(generator), distribution(generator), distribution(generator));
+	};
+
+	auto lightsUpdate = [this, &randVec3](size_t offset, size_t size)
 	{
 		for (size_t i = offset; i < offset + size; i++)
 		{
 			if (glm::length(mLights[i].position) > 25)
 			{
-				mLightsDirections[i] = randVec3;
-				mLights[i].intensity = glm::abs(randVec3);
-				mLights[i].position = randVec3 * glm::vec3(20, 0, 20);
+				mLightsDirections[i] = randVec3();
+				mLights[i].intensity = glm::abs(randVec3());
+				mLights[i].position = randVec3() * glm::vec3(20, 0, 20);
 				mSpeeds[i] = (1 + (rand() % 100)) / 200.0f;
 			}
 
