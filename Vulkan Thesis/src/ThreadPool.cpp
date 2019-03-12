@@ -1,14 +1,8 @@
 #include "ThreadPool.h"
 
-Thread::Thread(vk::Device device, uint32_t familyIndex)
-	: mDevice(device)
+Thread::Thread(size_t id)
+	: mID(id)
 {
-	vk::CommandPoolCreateInfo poolInfo;
-	poolInfo.queueFamilyIndex = familyIndex;
-	poolInfo.flags |= vk::CommandPoolCreateFlagBits::eTransient;
-	
-	mCommandPool = mDevice.createCommandPoolUnique(poolInfo);
-	
 	mThread = std::thread(&Thread::run, this);
 }
 
@@ -32,15 +26,14 @@ void Thread::run()
 	{
 		{
 			std::unique_lock<std::mutex> lock(mWorkMutex);
-			mWorkCondition.wait(lock, [this]() { return mWork != nullptr; });
+			mWorkCondition.wait(lock, [this]() { return mWork != nullptr || mDestroy; });
 
 			if (mDestroy)
 				break;
 
-			createCmdBuffer();
 			auto work = std::move(mWork);
 			
-			work(*mCommandBuffer);
+			work(mID);
 		}
 
 		{
@@ -49,16 +42,6 @@ void Thread::run()
 			mWorkCondition.notify_one();
 		}
 	}
-}
-
-void Thread::createCmdBuffer()
-{
-	vk::CommandBufferAllocateInfo allocInfo;
-	allocInfo.commandPool = *mCommandPool;
-	allocInfo.level = vk::CommandBufferLevel::eSecondary;
-	allocInfo.commandBufferCount = 1;
-
-	mCommandBuffer = std::move(mDevice.allocateCommandBuffersUnique(allocInfo)[0]);
 }
 
 void Thread::addWork(ThreadFuncPtr work)
@@ -75,15 +58,10 @@ void Thread::wait()
 	mFinished = false;
 }
 
-vk::UniqueCommandBuffer&& Thread::getCommandBuffer()
-{
-	return std::move(mCommandBuffer);
-}
-
-ThreadPool::ThreadPool(vk::Device device, uint32_t familyIndex)
+ThreadPool::ThreadPool()
 {
 	for (size_t i = 0; i < std::thread::hardware_concurrency(); i++)
-		mThreads.emplace_back(std::make_unique<Thread>(device, familyIndex));
+		mThreads.emplace_back(std::make_unique<Thread>(i));
 }
 
 void ThreadPool::addWorkMultiplex(const ThreadFuncPtr& work)
@@ -92,17 +70,14 @@ void ThreadPool::addWorkMultiplex(const ThreadFuncPtr& work)
 		thread->addWork(work);
 }
 
+void ThreadPool::addWork(std::vector<ThreadFuncPtr>&& work)
+{
+	for (size_t i = 0; i < work.size(); i++)
+		mThreads[i % mThreads.size()]->addWork(work[i]); // todo work queue - modulo prepared
+}
+
 void ThreadPool::wait()
 {
 	for (auto& thread : mThreads)
 		thread->wait();
-}
-
-std::vector<vk::UniqueCommandBuffer> ThreadPool::getCommandBuffers()
-{
-	std::vector<vk::UniqueCommandBuffer> buffers;
-	for (auto& thread : mThreads)
-		buffers.emplace_back(thread->getCommandBuffer());
-
-	return buffers;
 }

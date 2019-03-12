@@ -199,8 +199,6 @@ Context::Context(GLFWwindow* window)
 	findQueueFamilyIndices();
 	createLogicalDevice();
 	createCommandPools();
-
-	mThreadPool = std::make_unique<ThreadPool>(*mDevice, mQueueFamilyIndices.graphicsFamily.first);
 }
 
 void Context::createInstance()

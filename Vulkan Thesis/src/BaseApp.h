@@ -40,6 +40,7 @@ public:
 
 	UI& getUI();
 	Renderer& getRenderer();
+	ThreadPool& getThreadPool();
 
 private:
 	BaseApp();
@@ -81,6 +82,8 @@ private:
 
 private:
 	GLFWwindow* mWindow = createWindow();
+	std::unique_ptr<ThreadPool>	mThreadPool; // deferred initialization
 	Renderer mRenderer;
 	UI mUI;
+	
 };

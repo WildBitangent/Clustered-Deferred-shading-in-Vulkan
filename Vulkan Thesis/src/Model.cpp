@@ -236,7 +236,7 @@ namespace
 }
 
 void Model::loadModel(Context& context, const std::string& path, const vk::Sampler& textureSampler,
-	const vk::DescriptorPool& descriptorPool, Resources& resources)
+	const vk::DescriptorPool& descriptorPool, Resources& resources, ThreadPool& pool)
 {
 	auto device = context.getDevice();
 	Utility utility(context);
@@ -270,22 +270,38 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	work.data = static_cast<uint8_t*>(device.mapMemory(*work.stagingBuffer.memory, 0, VK_WHOLE_SIZE, {}));
+
+	// create command pools
+	vk::CommandPoolCreateInfo poolInfo;
+	poolInfo.queueFamilyIndex = context.getQueueFamilyIndices().graphicsFamily.first;
+	poolInfo.flags |= vk::CommandPoolCreateFlagBits::eTransient;
+
+	std::vector<vk::UniqueCommandPool> commandPools;
+	for (size_t i = 0; i < std::thread::hardware_concurrency(); i++)
+		commandPools.emplace_back(device.createCommandPoolUnique(poolInfo));
 	
 	// create cmd buffers
 	vk::CommandBufferAllocateInfo allocInfo;
+	allocInfo.level = vk::CommandBufferLevel::eSecondary;
+	allocInfo.commandBufferCount = 1;
+	
+	for (auto& pool : commandPools)
+	{
+		allocInfo.commandPool = *pool;
+		work.commandBuffers.emplace_back(std::move(device.allocateCommandBuffersUnique(allocInfo)[0]));
+	}
+	
 	allocInfo.commandPool = context.getDynamicCommandPool();
 	allocInfo.level = vk::CommandBufferLevel::ePrimary;
-	allocInfo.commandBufferCount = 1;
-	vk::UniqueCommandBuffer cmd = std::move(context.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
+	vk::UniqueCommandBuffer cmd = std::move(device.allocateCommandBuffersUnique(allocInfo)[0]);
 
 	// spawn workers and wait for finish
-	context.getThreadPool().addWorkMultiplex([this, &work](vk::CommandBuffer& cmd) { threadWork(cmd, work); });
-	context.getThreadPool().wait();
+	pool.addWorkMultiplex([this, &work](size_t id) { threadWork(id, work); });
+	pool.wait();
 
 	// retrieve command buffers
-	auto cmdBuffersUnique = context.getThreadPool().getCommandBuffers();
 	std::vector<vk::CommandBuffer> cmdBuffers;
-	for (auto& cmd : cmdBuffersUnique)
+	for (auto& cmd : work.commandBuffers)
 		cmdBuffers.emplace_back(*cmd);
 
 	// execute all cmd buffers
@@ -363,10 +379,13 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 	context.getGraphicsQueue().waitIdle(); // todo mb use fences or semaphores? +1
 
 	device.updateDescriptorSets(descriptorWrites, {});
+
+	work.commandBuffers.clear();
 }
 
-void Model::threadWork(vk::CommandBuffer cmd, WorkerStruct& work)
+void Model::threadWork(size_t threadID, WorkerStruct& work)
 {
+	auto cmd = *work.commandBuffers[threadID];
 	// begin cmd buffer
 	vk::CommandBufferInheritanceInfo inheritanceInfo;
 

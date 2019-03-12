@@ -80,11 +80,6 @@ public:
 		return *mDynamicCommandPool;
 	}
 
-	ThreadPool& getThreadPool()
-	{
-		return *mThreadPool;
-	}
-
 private:
 	void createInstance();
 	void setupDebugCallback();
@@ -114,6 +109,5 @@ private:
 	vk::UniqueCommandPool	mStaticCommandPool;
 	vk::UniqueCommandPool	mDynamicCommandPool;
 
-	std::unique_ptr<ThreadPool>	mThreadPool; // deferred initialization
 	//vk::PhysicalDeviceProperties	mPhyisicalDeviceProperties;
 };

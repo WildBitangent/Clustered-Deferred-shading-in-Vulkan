@@ -46,7 +46,7 @@ struct LightParams // used with size of glm::vec4
 	glm::uvec2 screenSize;
 };
 
-Renderer::Renderer(GLFWwindow* window)
+Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	: mContext(window)
 	, mUtility(mContext)
 	, mResource(mContext.getDevice())
@@ -63,7 +63,7 @@ Renderer::Renderer(GLFWwindow* window)
 	createClusteredBuffers();
 	createLights();
 	createDescriptorPool();
-	mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource);
+	mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
 	createDescriptorSets();
 	createGraphicsCommandBuffers();
 	createComputeCommandBuffer();

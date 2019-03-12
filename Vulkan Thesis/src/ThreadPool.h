@@ -2,37 +2,28 @@
 #include <thread>
 #include <vulkan/vulkan.hpp>
 #include <mutex>
-#include <queue>
-#include <atomic>
 
-
-using ThreadFuncPtr = std::function<void(vk::CommandBuffer&)>;
+using ThreadFuncPtr = std::function<void(size_t)>;
 
 class Thread
 {
 public:
-	Thread(vk::Device device, uint32_t familyIndex);
+	Thread(size_t id);
 	~Thread();
-
 
 	void addWork(ThreadFuncPtr work);
 	void wait();
 
-	vk::UniqueCommandBuffer&& getCommandBuffer();
-
 private:
 	void run();
-	void createCmdBuffer();
 
 private:
 	std::thread mThread;
-	vk::Device mDevice;
-	vk::UniqueCommandPool mCommandPool;
-	vk::UniqueCommandBuffer mCommandBuffer;
-		
 	std::mutex mWorkMutex;
 	std::condition_variable mWorkCondition;
 	ThreadFuncPtr mWork;
+	size_t mID;
+
 	bool mDestroy = false;
 	bool mFinished = false;
 
@@ -42,11 +33,11 @@ private:
 class ThreadPool
 {
 public:
-	ThreadPool(vk::Device device, uint32_t familyIndex);
+	ThreadPool();
 
 	void addWorkMultiplex(const ThreadFuncPtr& work); // all threads do the same task
+	void addWork(std::vector<ThreadFuncPtr>&& work); // assign work to only some threads
 	void wait();
-	std::vector<vk::UniqueCommandBuffer> getCommandBuffers();
 
 private:
 	std::vector<std::unique_ptr<Thread>> mThreads;

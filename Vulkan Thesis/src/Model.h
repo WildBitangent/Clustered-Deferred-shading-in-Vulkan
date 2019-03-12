@@ -48,6 +48,7 @@ struct WorkerStruct
 {
 	WorkerStruct(Utility& utility) : utility(utility) {}
 	std::vector<MeshMaterialGroup> groups;
+	std::vector<vk::UniqueCommandBuffer> commandBuffers;
 
 	Utility& utility;
 	uint8_t* data;
@@ -70,12 +71,12 @@ public:
 	Model& operator=(Model&& model) = default;
 
 	void loadModel(Context& context, const std::string& path, const vk::Sampler& textureSampler,
-		const vk::DescriptorPool& descriptorPool, resource::Resources& resources); // TODO: refactor
+		const vk::DescriptorPool& descriptorPool, resource::Resources& resources, ThreadPool& pool); // TODO: refactor
 
 	const std::vector<MeshPart>& getMeshParts() const;
 
 private:
-	void threadWork(vk::CommandBuffer cmd, WorkerStruct& work);
+	void threadWork(size_t threadID, WorkerStruct& work);
 	
 private:
 	std::vector<MeshPart> mParts;

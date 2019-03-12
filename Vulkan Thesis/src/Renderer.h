@@ -12,7 +12,7 @@ struct PointLight;
 class Renderer
 {
 public:
-	Renderer(GLFWwindow* window);
+	Renderer(GLFWwindow* window, ThreadPool& pool); // todo move thread pool to utility when it's singleton
 	// ~Renderer();
 
 	//void resize(int width, int height);

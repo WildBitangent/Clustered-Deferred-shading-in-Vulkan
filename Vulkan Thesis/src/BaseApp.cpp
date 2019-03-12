@@ -69,8 +69,14 @@ Renderer& BaseApp::getRenderer()
 	return mRenderer;
 }
 
+ThreadPool& BaseApp::getThreadPool()
+{
+	return *mThreadPool;
+}
+
 BaseApp::BaseApp()
-	: mRenderer(mWindow)
+	: mThreadPool(std::make_unique<ThreadPool>())
+	, mRenderer(mWindow, *mThreadPool)
 	, mUI(mWindow, mRenderer)
 {
 	mLights.reserve(50'000); // todo refactor for max tile lights
@@ -126,27 +132,43 @@ GLFWwindow* BaseApp::createWindow()
 	return window;
 }
 
+#define randVec3 glm::normalize(glm::vec3(rand() - RAND_MAX / 2, rand() - RAND_MAX / 2, rand() - RAND_MAX / 2))
+
 void BaseApp::tick(float dt)
 {
-	auto randVec3 = []()
+	auto lightsUpdate = [this](size_t offset, size_t size)
 	{
-		return glm::normalize(glm::vec3(rand() - RAND_MAX / 2, rand() - RAND_MAX / 2, rand() - RAND_MAX / 2));
-	};
-
-	if (mUI.mContext.lightsAnimation)
-	{
-		for (size_t i = 1; i < mUI.mContext.lightsCount; i++)
+		for (size_t i = offset; i < offset + size; i++)
 		{
 			if (glm::length(mLights[i].position) > 25)
 			{
-				mLightsDirections[i] = randVec3();
-				mLights[i].intensity = glm::abs(randVec3());
-				mLights[i].position = randVec3() * glm::vec3(20, 0, 20);
+				mLightsDirections[i] = randVec3;
+				mLights[i].intensity = glm::abs(randVec3);
+				mLights[i].position = randVec3 * glm::vec3(20, 0, 20);
 				mSpeeds[i] = (1 + (rand() % 100)) / 200.0f;
 			}
 
 			mLights[i].position += mLightsDirections[i] * mSpeeds[i];
 		}
+	};
+
+	if (mUI.mContext.lightsAnimation)
+	{
+		if (mUI.mContext.lightsCount > (1 << 8))
+		{
+			size_t lightsPerThread = mUI.mContext.lightsCount / std::thread::hardware_concurrency();
+			mThreadPool->addWorkMultiplex([&](size_t id)
+			{
+				const auto offset = id * lightsPerThread + 1;
+				const auto lightsCount = (id == std::thread::hardware_concurrency() - 1) ? mUI.mContext.lightsCount - offset : lightsPerThread;
+
+				lightsUpdate(offset, lightsCount);
+			});
+
+			mThreadPool->wait();
+		}
+		else
+			lightsUpdate(1, mUI.mContext.lightsCount);
 	}
 
 
