@@ -1,36 +1,32 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 
-#define LOCAL_SIZE 1024
+#define LOCAL_SIZE 512
 
-layout(std430, set = 1, binding = 4) buffer pageTable
+layout(std430, set = 1, binding = 4) buffer PageTable
 {
-	uint pageCounter; // make it 2
+	uint counter;
+	uint wgy; // pad for indirect dispatch
+	uint wgz;
+
 	uint nodes[];
 } table;
-
-shared uint counter;
 
 layout(local_size_x = LOCAL_SIZE) in;
 void main()
 {
-	uint tid = gl_LocalInvocationIndex;
+	bool predicate = table.nodes[gl_GlobalInvocationID.x] == 1;
+	uvec4 ballot = subgroupBallot(predicate);
+	uint pageCount = subgroupBallotBitCount(ballot);
 
-	if (tid == 0)
-		counter = 1;
+	uint offset;
+	if (subgroupElect())
+		offset = atomicAdd(table.counter, pageCount);
 
-	barrier();
+	offset = subgroupBroadcastFirst(offset) + subgroupBallotExclusiveBitCount(ballot) + 1; // starting from index 1
 
-	for (uint i = tid; i < 32768; i += LOCAL_SIZE)
-	{
-		if (table.nodes[i] == 1)
-			table.nodes[i] = atomicAdd(counter, 1);
-		// else
-		// 	table.nodes[i] = 0;
-	}
-
-	barrier();
-
-	if (gl_LocalInvocationIndex == 0)
-		table.pageCounter = counter - 1;
+	// write to the global memory
+	if (predicate)
+		table.nodes[gl_GlobalInvocationID.x] = offset;
 }

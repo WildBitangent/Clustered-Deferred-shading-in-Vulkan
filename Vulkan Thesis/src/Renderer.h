@@ -9,6 +9,14 @@
 struct GLFWwindow;
 struct PointLight;
 
+// enum class TileSize
+// {
+// 	_8x8 = 8,
+// 	_16x16 = 16,
+// 	_32x32 = 32,
+// 	_64x64 = 64,
+// };
+
 class Renderer
 {
 public:
@@ -22,7 +30,8 @@ public:
 	void setCamera(const glm::mat4& view, const glm::vec3 campos);
 	void updateLights(const std::vector<PointLight>& lights); 
 
-	void reloadShaders();
+	void reloadShaders(size_t size);
+	// void changeTileSize(TileSize size);
 
 private:
 	void recreateSwapChain();
@@ -47,6 +56,9 @@ private:
 
 	void updateUniformBuffers();
 	void drawFrame();
+
+	void submitLightCullingCmds(size_t imageIndex);
+	void submitLightSortingCmds(size_t imageIndex);
 
 private:
 	Context mContext;
@@ -105,10 +117,12 @@ private:
 	vk::DeviceSize mLightsOutOffset;
 	vk::DeviceSize mPointLightsOffset;
 	vk::DeviceSize mLightsIndirectionOffset;
+	vk::DeviceSize mSplittersOffset;
 
 	vk::DeviceSize mLightsOutSize;
 	vk::DeviceSize mPointLightsSize;
 	vk::DeviceSize mLightsIndirectionSize;
+	vk::DeviceSize mSplittersSize;
 
 	// Cluster buffer
 	BufferParameters mClusteredBuffer;
@@ -121,6 +135,11 @@ private:
 	vk::DeviceSize mUniqueClustersSize;
 
 	size_t mLightsCount; // for sorting
+	size_t mCurrentTileSize = 32;
+	size_t mSubGroupSize;
+	std::string mLightBufferSwapUsed = "lightculling_01";
+	
+	glm::uvec2 mTileCount;
 
 	friend class UI;
 };

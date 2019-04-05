@@ -57,11 +57,15 @@ void UI::update()
 
 	using namespace ImGui;
 
-	Begin("Debug Settings");
+	if (Begin("Debug Settings"))
 	{
-		TreeNode("Render texture");
-		{
+		Text("%.3f ms/frame (%.1f FPS)", 1000.0f / GetIO().Framerate, GetIO().Framerate);
 
+		Checkbox("Light animation", &mContext.lightsAnimation);
+		Checkbox("V-Sync", &mContext.vSync);
+
+		if (TreeNode("Render texture"))
+		{
 			const auto names = { "Default", "Albedo", "Normal", "Specular", "Position", "Depth" };
 
 			for (size_t i = 0; i < static_cast<size_t>(DebugStates::count); i++)
@@ -74,13 +78,10 @@ void UI::update()
 			}
 			TreePop();
 		}
-
-		Checkbox("Light animation", &mContext.lightsAnimation);
-
-		End();
 	}
+	End();
 
-	Begin("Tile settings");
+	if (Begin("Tile settings"))
 	{
 		constexpr int maxLights = 50'000; // todo refarctor this
 		DragInt("Number of lights", &mContext.lightsCount, 10, 1, maxLights);
@@ -88,9 +89,11 @@ void UI::update()
 		// v_max doesn't work properly, make sure it doesn't exceed
 		if (mContext.lightsCount > maxLights) mContext.lightsCount = maxLights;
 
-		End();
+		const char* options[] = { "8x8", "16x16", "32x32", "64x64" };
+		if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
+			mContext.shaderReloadDirtyBit = true;
 	}
-
+	End();
 }
 
 void UI::copyDrawData()

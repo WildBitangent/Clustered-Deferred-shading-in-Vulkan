@@ -12,6 +12,7 @@
 
 #include "lodepng.h"
 
+#include <spirv-tools/optimizer.hpp>
 
 namespace
 {
@@ -144,20 +145,56 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 
 	if (!program.link(messages))
 	{
-		std::cout << shader.getInfoLog() << std::endl;		//TODO make LOGGER
-		std::cout << shader.getInfoDebugLog() << std::endl;
+		std::cout << program.getInfoLog() << std::endl;		//TODO make LOGGER
+		std::cout << program.getInfoDebugLog() << std::endl;
 
 		throw std::runtime_error("Failed to link program: " + filename);
 	}
 
 	std::vector<uint32_t> spirV;
 	spv::SpvBuildLogger logger;
-	glslang::SpvOptions spvOptions;
-	glslang::GlslangToSpv(*program.getIntermediate(shaderType), spirV, &logger, &spvOptions);
+	glslang::GlslangToSpv(*program.getIntermediate(shaderType), spirV, &logger, nullptr);
 
+
+	// Optimize spirv
+	auto msger = [] (spv_message_level_t level, const char*, const spv_position_t& position, const char* message) {
+		switch (level) {
+		case SPV_MSG_FATAL:
+		case SPV_MSG_INTERNAL_ERROR:
+		case SPV_MSG_ERROR:
+			std::cerr << "error: line " << position.index << ": " << message << std::endl;
+			break;
+		case SPV_MSG_WARNING:
+			std::cout << "warning: line " << position.index << ": " << message << std::endl;
+			break;
+		case SPV_MSG_INFO:
+			std::cout << "info: line " << position.index << ": " << message<< std::endl;
+			break;
+		default:
+			break;
+		}
+	};
+	
+	spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
+	optimizer.SetMessageConsumer(msger);
+	// optimizer.RegisterPerformancePasses();
+	// optimizer.RegisterPass(spvtools::CreateLoopUnrollPass(true));
+	// optimizer.RegisterLegalizationPasses();
+	
+	if (!optimizer.Run(spirV.data(), spirV.size(), &spirV))
+	{
+		// throw std::runtime_error("Failed to optimize SpirV program: " + filename);
+		//TODO log about failure
+		std::cout << "Failed to optimize SpirV program: " + filename;
+	}
+	
+	
 	// std::ofstream outFile(filename + ".spv"); // TODO make spv folder or smth
 	// spv::Disassemble(outFile, spirV);
-
+	
+	// if (filename == "data/bvh_merge.comp")
+	// 	spv::Disassemble(std::cout, spirV);
+	
 	return spirV;
 }
 

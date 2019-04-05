@@ -1,0 +1,362 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+
+#define LOCAL_SIZE 256
+#define WARP_COUNT LOCAL_SIZE / 32
+
+// ------------- STRUCTS -------------
+#include "structs.inl"
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 1) writeonly buffer Swap
+{
+	Key data[];
+} swap;
+
+layout(std430, set = 1, binding = 2) readonly buffer Lights
+{
+	Key data[];
+} lights;
+
+layout(push_constant) uniform pushConstants 
+{
+	uint mergePhase;
+};
+
+shared uint mortons[LOCAL_SIZE * 4]; // 4 items per thread
+shared uint indices[LOCAL_SIZE * 4];
+
+#define SWAP(a, b, k1, k2) \
+	mortons[a] = k2; mortons[b] = k1; \
+	k1 = indices[a]; indices[a] = indices[b]; indices[b] = k1
+
+void bitonicWarpLastPhase(uint offset)
+{
+	uint tid = gl_LocalInvocationIndex & 0x1F;
+
+	for(uint j = 64; j > 0; j >>= 1)
+	{
+		uint jTid = tid & (j - 1);
+		uint jMultp = tid / j;
+
+		uint index = jTid + jMultp * (j << 1) + offset;
+
+		uint key1 = mortons[index];
+		uint key2 = mortons[index + j];
+
+		if (key1 > key2)
+		{
+			SWAP(index, index + j, key1, key2);
+		}
+
+		// mortons[index] = min(key1, key2);
+		// mortons[index + j] = max(key1, key2);
+
+		index += (j == 64) ? 32 : 64;
+
+		key1 = mortons[index];
+		key2 = mortons[index + j];
+
+		if (key1 > key2)
+		{
+			SWAP(index, index + j, key1, key2);
+		}
+
+		// mortons[index] = max(key1, key2);
+		// mortons[index + j] = min(key1, key2);
+	}
+}
+
+void loadA(uint ai)
+{
+	uint localTid = gl_LocalInvocationIndex & 0x1F;
+	uint offset = gl_WorkGroupID.x << (10 + mergePhase);
+	uint warpID = gl_LocalInvocationIndex >> 5;
+	uint warpOffset = (128 << mergePhase) * warpID;
+
+	uint index = offset + warpOffset + localTid + 64 * ai;
+	uint sharedWarpOffset = 128 * warpID + 31 - localTid;
+
+	mortons[sharedWarpOffset + 32] = lights.data[index].mortonCode;
+	mortons[sharedWarpOffset] = lights.data[index + 32].mortonCode;
+
+	indices[sharedWarpOffset + 32] = lights.data[index].lightIndex;
+	indices[sharedWarpOffset] = lights.data[index + 32].lightIndex;
+}
+
+void loadB(uint bi)
+{
+	uint localTid = gl_LocalInvocationIndex & 0x1F;
+	uint offset = gl_WorkGroupID.x << (10 + mergePhase);
+	uint warpID = gl_LocalInvocationIndex >> 5;
+	uint warpOffset = (128 << mergePhase) * warpID;
+
+	uint index = offset + warpOffset + localTid + 64 * bi + (64 << mergePhase);
+	uint sharedWarpOffset = 128 * warpID + 31 - localTid;
+
+	mortons[sharedWarpOffset + 32] = lights.data[index].mortonCode;
+	mortons[sharedWarpOffset] = lights.data[index + 32].mortonCode;
+
+	indices[sharedWarpOffset + 32] = lights.data[index].lightIndex;
+	indices[sharedWarpOffset] = lights.data[index + 32].lightIndex;
+}
+
+// void loadA(uint ai)
+// {
+// 	uint gl_SubgroupInvocationID = gl_LocalInvocationIndex & 0x1F;
+// 	uint offset = gl_WorkGroupID.x << (9 + mergePhase);
+// 	uint warpID = gl_LocalInvocationIndex >> 5;
+// 	uint warpOffset = (128 << mergePhase) * warpID;
+
+// 	uint index = offset + warpOffset + gl_SubgroupInvocationID + 64 * ai;
+// 	uint sharedWarpOffset = 128 * warpID + 31 - gl_SubgroupInvocationID;
+
+// 	mortons[sharedWarpOffset + 32] = lights.data[index].mortonCode;
+// 	mortons[sharedWarpOffset] = lights.data[index + 32].mortonCode;
+
+// 	indices[sharedWarpOffset + 32] = lights.data[index].lightIndex;
+// 	indices[sharedWarpOffset] = lights.data[index + 32].lightIndex;
+// }
+
+// void loadB(uint bi)
+// {
+// 	uint gl_SubgroupInvocationID = gl_LocalInvocationIndex & 0x1F;
+// 	uint offset = gl_WorkGroupID.x << (9 + mergePhase);
+// 	uint warpID = gl_LocalInvocationIndex >> 5;
+// 	uint warpOffset = (128 << mergePhase) * warpID;
+
+// 	uint index = offset + warpOffset + gl_SubgroupInvocationID + 64 * bi + (64 << mergePhase);
+// 	uint sharedWarpOffset = 128 * warpID + 31 - gl_SubgroupInvocationID;
+
+// 	mortons[sharedWarpOffset + 32] = lights.data[index].mortonCode;
+// 	mortons[sharedWarpOffset] = lights.data[index + 32].mortonCode;
+
+// 	indices[sharedWarpOffset + 32] = lights.data[index].lightIndex;
+// 	indices[sharedWarpOffset] = lights.data[index + 32].lightIndex;
+// }
+
+
+layout(local_size_x = LOCAL_SIZE) in;
+// void main()
+// {
+// 	uint offset = gl_WorkGroupID.x << (9 + mergePhase);
+// 	uint warpOffset = (128 << mergePhase) * gl_SubgroupID;
+
+// 	// discard warp if it's out of bounds
+// 	if (offset + warpOffset + (128 << (mergePhase -1)) >= lightCount_screenSize.x)
+// 		return;
+	
+// 	uint subgroupReverseInvocationID = (gl_SubgroupSize == 32) ? 31 - gl_SubgroupInvocationID : 63 - gl_SubgroupInvocationID;
+// 	uint sharedWarpOffset = 128 * gl_SubgroupID;
+// 	uint globalOffset = offset + warpOffset + gl_SubgroupInvocationID;
+
+// 	if (gl_SubgroupSize == 32) // nvidia
+// 	{
+// 		mortons[sharedWarpOffset + 32 + subgroupReverseInvocationID] = lights.data[offset + warpOffset + gl_SubgroupInvocationID].mortonCode;
+// 		mortons[sharedWarpOffset + subgroupReverseInvocationID] = lights.data[offset + warpOffset + 32 + gl_SubgroupInvocationID].mortonCode;
+// 		mortons[sharedWarpOffset + 64 + gl_SubgroupInvocationID] = lights.data[offset + warpOffset + (64 << mergePhase) + gl_SubgroupInvocationID].mortonCode;
+// 		mortons[sharedWarpOffset + 96 + gl_SubgroupInvocationID] = lights.data[offset + warpOffset + (64 << mergePhase) + 32 + gl_SubgroupInvocationID].mortonCode;
+
+// 		indices[sharedWarpOffset + 32 + subgroupReverseInvocationID] = lights.data[offset + warpOffset + gl_SubgroupInvocationID].lightIndex;
+// 		indices[sharedWarpOffset + subgroupReverseInvocationID] = lights.data[offset + warpOffset + 32 + gl_SubgroupInvocationID].lightIndex;
+// 		indices[sharedWarpOffset + 64 + gl_SubgroupInvocationID] = lights.data[offset + warpOffset + (64 << mergePhase) + gl_SubgroupInvocationID].lightIndex;
+// 		indices[sharedWarpOffset + 96 + gl_SubgroupInvocationID] = lights.data[offset + warpOffset + (64 << mergePhase) + 32 + gl_SubgroupInvocationID].lightIndex;
+
+// 	}
+// 	else
+// 	{
+// 		mortons[sharedWarpOffset + subgroupReverseInvocationID] = lights.data[offset + warpOffset + 32 + gl_SubgroupInvocationID].mortonCode;
+// 		mortons[sharedWarpOffset + 64 + gl_SubgroupInvocationID] = lights.data[offset + warpOffset + (64 << mergePhase) + gl_SubgroupInvocationID].mortonCode;
+
+// 		indices[sharedWarpOffset + subgroupReverseInvocationID] = lights.data[offset + warpOffset + 32 + gl_SubgroupInvocationID].lightIndex;
+// 		indices[sharedWarpOffset + 64 + gl_SubgroupInvocationID] = lights.data[offset + warpOffset + (64 << mergePhase) + gl_SubgroupInvocationID].lightIndex;
+// 	}
+
+// 	uint aMax = mortons[sharedWarpOffset];
+// 	uint bMax = mortons[sharedWarpOffset + 127];
+
+// 	bitonicWarpLastPhase(sharedWarpOffset);
+
+// 	swap.data[globalOffset].mortonCode = mortons[sharedWarpOffset + gl_SubgroupInvocationID];
+// 	swap.data[globalOffset + 32].mortonCode = mortons[sharedWarpOffset + gl_SubgroupInvocationID + 32];
+
+// 	swap.data[globalOffset].lightIndex = indices[sharedWarpOffset + gl_SubgroupInvocationID];
+// 	swap.data[globalOffset + 32].lightIndex = indices[sharedWarpOffset + gl_SubgroupInvocationID + 32];
+
+// 	uint ai = 1;
+// 	uint bi = 1;
+// 	uint bElems = (lightCount_screenSize.x - (warpOffset + offset + (64 << mergePhase))) >> 6;
+
+// 	while (ai + bi < (2 << mergePhase))
+// 	{
+// 		// load lower half
+// 		if (aMax < bMax)
+// 		{
+// 			if (ai < (1 << mergePhase))
+// 			{
+// 				loadA(ai++);
+// 				aMax = mortons[sharedWarpOffset];
+// 			}
+// 			else
+// 			{
+// 				if (bi <= bElems)
+// 				{
+// 					loadB(bi++);
+// 					bMax = mortons[sharedWarpOffset];
+// 				}
+// 				else
+// 					break;
+// 			}
+// 		}
+// 		else
+// 		{
+// 			if (bi <= bElems && bi < (1 << mergePhase))
+// 			{
+// 				loadB(bi++);
+// 				bMax = mortons[sharedWarpOffset];
+// 			}
+// 			else
+// 			{
+// 				if (ai < (1 << mergePhase))
+// 				{
+// 					loadA(ai++);
+// 					aMax = mortons[sharedWarpOffset];
+// 				}
+// 				else
+// 					break;
+// 			}
+// 		}
+
+// 		bitonicWarpLastPhase(sharedWarpOffset);
+
+// 		uint dataOffset = 64 * (ai + bi - 2);
+// 		swap.data[globalOffset + dataOffset].mortonCode = mortons[sharedWarpOffset + gl_SubgroupInvocationID];
+// 		swap.data[globalOffset + dataOffset + 32].mortonCode = mortons[sharedWarpOffset + gl_SubgroupInvocationID + 32];
+
+// 		swap.data[globalOffset + dataOffset].lightIndex = indices[sharedWarpOffset + gl_SubgroupInvocationID];
+// 		swap.data[globalOffset + dataOffset + 32].lightIndex = indices[sharedWarpOffset + gl_SubgroupInvocationID + 32];
+// 	}
+
+// 	uint dataOffset = 64 * (ai + bi - 1);
+// 	swap.data[globalOffset + dataOffset].mortonCode = mortons[sharedWarpOffset + gl_SubgroupInvocationID + 64];
+// 	swap.data[globalOffset + dataOffset + 32].mortonCode = mortons[sharedWarpOffset + gl_SubgroupInvocationID + 96];
+
+// 	swap.data[globalOffset + dataOffset].lightIndex = indices[sharedWarpOffset + gl_SubgroupInvocationID + 64];
+// 	swap.data[globalOffset + dataOffset + 32].lightIndex = indices[sharedWarpOffset + gl_SubgroupInvocationID + 96];	
+// }
+
+
+
+void main()
+{
+	uint tid = gl_LocalInvocationIndex;
+	uint offset = gl_WorkGroupID.x << (10 + mergePhase);
+	uint warpID = tid >> 5;
+	uint warpOffset = (128 << mergePhase) * warpID;
+
+	uint localTid = gl_LocalInvocationIndex & 0x1F;
+	uint subgroupReverseInvocationID = 31 - localTid;
+	uint sharedWarpOffset = 128 * warpID;
+	uint globalOffset = offset + warpOffset + localTid;
+
+
+	// discard warp if it's out of bounds
+	if (offset + warpOffset + (128 << (mergePhase - 1)) >= lightCount_screenSize.x)
+	{
+		// if (mergePhase == 2 && localTid	== 0)
+		// 	swap.data[3072 + 6 - warpID].mortonCode = globalOffset;
+		uint alignedLights = (lightCount_screenSize.x + 63) & ~0x3F; 
+		for (uint i = globalOffset; i < alignedLights; i += 32)
+			swap.data[i] = lights.data[i];
+		return;
+	}
+
+	mortons[sharedWarpOffset + 32 + subgroupReverseInvocationID] = lights.data[offset + warpOffset + localTid].mortonCode;
+	mortons[sharedWarpOffset + subgroupReverseInvocationID] = lights.data[offset + warpOffset + 32 + localTid].mortonCode;
+	mortons[sharedWarpOffset + 64 + localTid] = lights.data[offset + warpOffset + (64 << mergePhase) + localTid].mortonCode; // shift most likely wrong
+	mortons[sharedWarpOffset + 96 + localTid] = lights.data[offset + warpOffset + (64 << mergePhase) + 32 + localTid].mortonCode;
+
+	indices[sharedWarpOffset + 32 + subgroupReverseInvocationID] = lights.data[offset + warpOffset + localTid].lightIndex;
+	indices[sharedWarpOffset + subgroupReverseInvocationID] = lights.data[offset + warpOffset + 32 + localTid].lightIndex;
+	indices[sharedWarpOffset + 64 + localTid] = lights.data[offset + warpOffset + (64 << mergePhase) + localTid].lightIndex;
+	indices[sharedWarpOffset + 96 + localTid] = lights.data[offset + warpOffset + (64 << mergePhase) + 32 + localTid].lightIndex;
+
+	uint aMax = mortons[sharedWarpOffset];
+	uint bMax = mortons[sharedWarpOffset + 127];
+
+	bitonicWarpLastPhase(sharedWarpOffset);
+
+	swap.data[globalOffset].mortonCode = mortons[sharedWarpOffset + localTid];
+	swap.data[globalOffset + 32].mortonCode = mortons[sharedWarpOffset + localTid + 32];
+
+	swap.data[globalOffset].lightIndex = indices[sharedWarpOffset + localTid];
+	swap.data[globalOffset + 32].lightIndex = indices[sharedWarpOffset + localTid + 32];
+
+	uint ai = 1;
+	uint bi = 1;
+	uint bElems = ((lightCount_screenSize.x - (warpOffset + offset + (64 << mergePhase)) - 1) >> 6) + 1;
+
+	while (ai + bi < (2 << mergePhase))
+	{
+		// load lower half
+		if (aMax < bMax)
+		{
+			if (ai < (1 << mergePhase))
+			{
+				loadA(ai++);
+				aMax = mortons[sharedWarpOffset];
+			}
+			else
+			{
+				if (bi < bElems)
+				{
+					loadB(bi++);
+					bMax = mortons[sharedWarpOffset];
+				}
+				else
+					break;
+			}
+		}
+		else
+		{
+			if (bi < bElems && bi < (1 << mergePhase))
+			{
+				loadB(bi++);
+				bMax = mortons[sharedWarpOffset];
+			}
+			else
+			{
+				if (ai < (1 << mergePhase))
+				{
+					loadA(ai++);
+					aMax = mortons[sharedWarpOffset];
+				}
+				else
+					break;
+			}
+		}
+
+		bitonicWarpLastPhase(sharedWarpOffset);
+
+		uint dataOffset = 64 * (ai + bi - 2);
+		swap.data[globalOffset + dataOffset].mortonCode = mortons[sharedWarpOffset + localTid];
+		swap.data[globalOffset + dataOffset + 32].mortonCode = mortons[sharedWarpOffset + localTid + 32];
+
+		swap.data[globalOffset + dataOffset].lightIndex = indices[sharedWarpOffset + localTid];
+		swap.data[globalOffset + dataOffset + 32].lightIndex = indices[sharedWarpOffset + localTid + 32];
+	}
+
+	uint dataOffset = 64 * (ai + bi - 1);
+	swap.data[globalOffset + dataOffset].mortonCode = mortons[sharedWarpOffset + localTid + 64];
+	swap.data[globalOffset + dataOffset + 32].mortonCode = mortons[sharedWarpOffset + localTid + 96];
+
+	swap.data[globalOffset + dataOffset].lightIndex = indices[sharedWarpOffset + localTid + 64];
+	swap.data[globalOffset + dataOffset + 32].lightIndex = indices[sharedWarpOffset + localTid + 96];	
+}

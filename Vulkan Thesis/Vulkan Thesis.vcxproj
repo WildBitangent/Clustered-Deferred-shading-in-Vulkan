@@ -103,8 +103,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>D:\Vulkan SDKs\1.1.101.0\Include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator Libs\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\Vulkan SDKs\1.1.101.0\Lib;D:\Vulkan SDKs\GLSLang Validator Libs\lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>D:\Vulkan SDKs\1.1.101.0\Include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator\Project101\_Build\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Vulkan SDKs\1.1.101.0\Lib;D:\Vulkan SDKs\GLSLang Validator\Project101\_Build\lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -114,8 +114,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>D:\VulkanSDK\1.1.97.0\Include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\VulkanSDK\GLFW\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\VulkanSDK\1.1.97.0\Lib;D:\VulkanSDK\GLFW\lib_x64;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>D:\Vulkan SDKs\1.1.101.0\Include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;D:\Vulkan SDKs\OpenGLMath;D:\Vulkan SDKs\GLFW\include;D:\Vulkan SDKs\GLSLang Validator\Project101\_Build\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Vulkan SDKs\1.1.101.0\Lib;D:\Vulkan SDKs\GLSLang Validator\Project101\_Build\lib;D:\Vulkan SDKs\_GLFW\lib-vc2015;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebug|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -149,7 +149,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;glslangd.lib;SPIRVd.lib;OSDependentd.lib;OGLCompilerd.lib;ImGUI_x64d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;glslangd.lib;SPIRVd.lib;SPIRV-Toolsd.lib;SPIRV-Tools-optd.lib;HLSLd.lib;OSDependentd.lib;OGLCompilerd.lib;ImGUI_x64d.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>
       </IgnoreAllDefaultLibraries>
     </Link>
@@ -198,13 +198,15 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;ImGUI_x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;ImGUI_x64.lib;glslang.lib;SPIRV.lib;SPIRV-Tools.lib;HLSL.lib;OSDependent.lib;OGLCompiler.lib;SPIRV-Tools-opt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebug|x64'">

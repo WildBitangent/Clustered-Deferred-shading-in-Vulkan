@@ -1,0 +1,90 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_control_flow_attributes : require
+
+// ------------- STRUCTS -------------
+#include "structs.inl"
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 1) writeonly buffer Swap
+{
+	Key swap[];
+};
+
+layout(std430, set = 1, binding = 2) readonly buffer Lights
+{
+	Key lights[];
+};
+
+layout(std430, set = 1, binding = 2) readonly buffer Splitters
+{
+	uint splitters[];
+};
+
+layout(std430, set = 1, binding = 2) writeonly buffer SwapIndices
+{
+	uint counter;
+	uint indices[];
+};
+
+layout(push_constant) uniform pushConstants 
+{
+	uint lastSublistLength;
+	uint listsCount;
+	uint loadOffset;
+	uint storeOffset;
+};
+
+shared uint storeCounter;
+shared uint listLength[128]; // max 128lists, otherwise parallelism is sufficient
+
+layout(local_size_x = 512) in;
+void main()
+{
+	uint tid = gl_LocalInvocationIndex;
+
+	if (tid == 0)
+		storeCounter = 0;
+
+	uint offset = loadOffset + listsCount * gl_WorkgroupID + tid;
+	if (tid < listsCount)
+	{
+		if (gl_WorkgroupID.x == 0)
+			listLength[tid] = splitters[offset];
+		else
+			listLength[tid] = splitters[offset] - splitters[offset - 1];
+	}
+	else
+		listLength[tid] = 0;
+
+	if (tid < 128)
+	{
+		uint sum = subgroupAdd(listLength[tid]);
+		if (subgroupElect())
+			listLength[tid] = sum;
+	}
+
+	barrier();
+
+	if (tid < 2) listLength[tid] = listLength[(tid * 2) * gl_SubgroupSize] + listLength[(tid * 2 + 1) * gl_SubgroupSize];
+	if (tid == 0) listLength[0] += listLength[tid + 1];
+
+	barrier();
+
+	// traverse all lists
+	for (uint l = 0; l < listsCount; l++)
+	{
+		for ()
+		{
+
+		}
+	}
+
+}

@@ -1,11 +1,16 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
+#extension GL_EXT_control_flow_attributes : enable
 
-#define TILE_SIZE 32 // TODO bake it with compilation or w/e
+// #define TILE_SIZE 32 // TODO bake it with compilation or w/e
 #define PAGE_SIZE 512
 #define PAGE_SIZE_POWER 9 // 2^9 TODO push constants?
 #define NEAR 0.5
-#define Y_SLICES 0.083381608939051058394765834642179160608822393696599701826
+// #define Y_SLICES 0.083381608939051058394765834642179160608822393696599701826
+
+layout (constant_id = 0) const int TILE_SIZE = 0;
+layout (constant_id = 1) const float Y_SLICES = 0.0;
+layout (constant_id = 2) const uint LOCAL_SIZE = 32;
 
 // --- structs ---
 struct Light
@@ -26,9 +31,12 @@ layout(set = 0, binding = 0) uniform CameraUBO
 
 layout(set = 1, binding = 3) uniform sampler2D samplerDepth;
 
-layout(std430, set = 1, binding = 4) buffer readonly pageTable
+layout(std430, set = 1, binding = 4) buffer readonly PageTable
 {
-	uint counter; // todo make it 2 at start
+	uint counter;
+	uint pad0; // pad for indirect dispatch
+	uint pad1;
+
 	uint nodes[];
 } table;
 
@@ -66,19 +74,44 @@ float getViewDepth(float projDepth)
 	return camera.proj[3][2] / (normalizedProjDepth + camera.proj[2][2]);
 }
 
-layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout(local_size_x_id = 2, local_size_y_id = 2) in;
 void main()
 {
-	if (gl_GlobalInvocationID.x >= lightCount_screenSize.y || gl_GlobalInvocationID.y >= lightCount_screenSize.z)
-		return;
+	if (TILE_SIZE <= 32)
+	{
+		if (gl_GlobalInvocationID.x >= lightCount_screenSize.y || gl_GlobalInvocationID.y >= lightCount_screenSize.z)
+			return;
 
-	uvec2 tileID = gl_WorkGroupID.xy;
-	float depth = getViewDepth(texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r);
-	uint k = uint(log(depth / NEAR) / Y_SLICES); // 72 slices along Y
-	uint key = packKey(uvec3(tileID, k));
-	// todo depth normalization?
+		uvec2 tileID = gl_WorkGroupID.xy;
+		float depth = getViewDepth(texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r);
+		uint k = uint(log(depth / NEAR) / Y_SLICES); 
+		uint key = packKey(uvec3(tileID, k));
+		// todo depth normalization?
 
-	uint address = addressTranslate(key);
+		uint address = addressTranslate(key);
 
-	pool.data[address] = key;
+		pool.data[address] = key;
+	}
+	else
+	{
+		int iter = TILE_SIZE / 32;
+		uvec2 tileID = gl_WorkGroupID.xy;
+
+		for (int x = 0; x < iter; x++)
+		{
+			for (int y = 0; y < iter; y++)
+			{
+				ivec2 dimension = ivec2((gl_WorkGroupID * iter + ivec3(x, y, 0)) * 32 + gl_LocalInvocationID);
+				if (dimension.x >= lightCount_screenSize.y || dimension.y >= lightCount_screenSize.z)
+					continue;
+
+				float depth = getViewDepth(texelFetch(samplerDepth, dimension, 0).r);
+				uint k = uint(log(depth / NEAR) / Y_SLICES); 
+				uint key = packKey(uvec3(tileID, k));
+
+				uint address = addressTranslate(key);
+				pool.data[address] = key;
+			}
+		}
+	}
 }

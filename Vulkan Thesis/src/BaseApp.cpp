@@ -27,11 +27,11 @@ void BaseApp::run()
 	while (!glfwWindowShouldClose(mWindow))
 	{
 		current = std::chrono::high_resolution_clock::now();
-		deltaTime = std::chrono::duration<float>(current - startTime).count();
+		deltaTime = std::chrono::duration<double>(current - startTime).count();
 
 		glfwPollEvents();
 
-		if (deltaTime > 1.0f / 60.0f)
+		if (deltaTime > 1.0 / 60.0)
 		{
 			tick(deltaTime);
 			startTime = current;
@@ -40,18 +40,21 @@ void BaseApp::run()
 			mRenderer.updateLights(mLights);
 			// mRenderer.cleanUp();
 		}
-		// else
-		// {
-		// 	mRenderer.requestDraw(1.f);
-		// }
-	
+		else if (mUI.mContext.vSync)
+			continue;
+		
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
-
+		
 		mUI.update();
-
 		ImGui::Render();
 		mUI.recordCommandBuffer();
+
+		if (mUI.mContext.shaderReloadDirtyBit)
+		{
+			mUI.mContext.shaderReloadDirtyBit = false;
+			mRenderer.reloadShaders(4 << (mUI.mContext.tileSize + 1));
+		}
 
 		mRenderer.requestDraw(1.f);
 		
@@ -147,7 +150,7 @@ void BaseApp::tick(float dt)
 	{
 		for (size_t i = offset; i < offset + size; i++)
 		{
-			if (glm::length(mLights[i].position) > 25)
+			if (glm::length(mLights[i].position) > 35)
 			{
 				mLightsDirections[i] = randVec3();
 				mLights[i].intensity = glm::abs(randVec3());
@@ -299,7 +302,8 @@ void BaseApp::onKeyPress(int key, int scancode, int action, int mods)
 
 
 		case GLFW_KEY_ENTER:
-			mRenderer.reloadShaders();
+			mRenderer.reloadShaders(4 << (mUI.mContext.tileSize + 1));
+			mUI.mContext.shaderReloadDirtyBit = false;
 			break;
 		}
 	}

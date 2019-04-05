@@ -1,0 +1,103 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_control_flow_attributes : require
+
+// ------------- STRUCTS -------------
+#include "structs.inl"
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 1) writeonly buffer Swap
+{
+	Key swap[];
+};
+
+layout(std430, set = 1, binding = 2) readonly buffer Lights
+{
+	Key lights[];
+};
+
+layout(std430, set = 1, binding = 2) readonly buffer Sublists
+{
+	uint sublists[];
+};
+
+layout(std430, set = 1, binding = 2) writeonly buffer SwapIndices
+{
+	uint counter;
+	uint indices[];
+};
+
+layout(push_constant) uniform pushConstants 
+{
+	uint lastSublistLength;
+	uint listsCount;
+	uint sublistsReadOffset;
+	uint loadOffset;
+	uint storeOffset;
+};
+
+shared uint sublistLengths[128];
+shared uint sublistExclusiveSums[128];
+shared uint sublistSums[4];
+
+layout(local_size_x = 1024) in;
+void main()
+{
+	if (tid < 128)
+		sublistLengths[tid] = sublists[loadOffset + (listsCount << 7) * gl_WorkGroupID.x + tid];
+
+	if (tid >= 128 && tid < 256)
+		sublistLengths[tid - 128] = sublists[loadOffset + (listsCount << 7) * (gl_WorkGroupID.x + gl_NumWorkGroups.x) + tid - 128];
+
+	barrier();
+
+
+	for (uint l = gl_SubgroupID; l < listsCount; l += gl_NumSubgroups); 
+	{
+		for (load)
+		{
+			
+		}
+	}
+
+	// load from A
+	uint index = 
+	uint lightIndexA = lights[];
+	uint mortonA = lightsIn[lightIndex].mortonCode;
+
+	// load from B
+	uint lightIndexB = 
+	uint mortonB =
+
+	mortons[gl_LocalInvocationIndex] = myMorton;
+	barrier();
+
+	// test quasi prefix sum
+	uint offset = 0;
+	for (uint i = 0; i < 512; i += 8)
+	{
+		[[unroll]]
+		for (uint x = 0; x < 8; x++)
+		{
+			if (i + x < gl_LocalInvocationIndex)
+				offset += uint(myMorton >= mortons[i + x]);
+			else
+				offset += uint(myMorton > mortons[i + x]);
+		}
+	}
+
+	// write every eight
+	if ((offset & 0x7) == 6)
+		splitters[offset >> 3] = myMorton;
+
+	if (gl_LocalInvocationIndex == 0)
+		splitters[127] = 0xFFFFFFFF;
+
+}

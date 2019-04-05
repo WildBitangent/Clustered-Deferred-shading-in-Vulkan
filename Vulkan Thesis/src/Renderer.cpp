@@ -8,6 +8,8 @@
 #include "Model.h"
 #include "BaseApp.h"
 #include "imgui.h"
+#include <valarray>
+#include <random>
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
@@ -15,10 +17,6 @@
 constexpr auto WIDTH = 1024;
 constexpr auto HEIGHT = 726;
 
-constexpr auto TILE_SIZE = 32;
-
-constexpr auto TILE_COUNT_X = (WIDTH - 1) / TILE_SIZE + 1;
-constexpr auto TILE_COUNT_Y = (HEIGHT - 1) / TILE_SIZE + 1;
 constexpr auto MAX_LIGHTS_PER_TILE = 1024;
 constexpr auto MAX_POINTLIGHTS = 50000;
 
@@ -50,7 +48,16 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	: mContext(window)
 	, mUtility(mContext)
 	, mResource(mContext.getDevice())
+	, mTileCount((WIDTH - 1) / mCurrentTileSize + 1, (HEIGHT - 1) / mCurrentTileSize + 1)
 {
+	vk::PhysicalDeviceSubgroupProperties subgroupProperties;
+	vk::PhysicalDeviceProperties2 properties2;
+	properties2.pNext = &subgroupProperties;
+
+	mContext.getPhysicalDevice().getProperties2(&properties2);
+
+	mSubGroupSize = subgroupProperties.subgroupSize;
+
 	createSwapChain();
 	createSwapChainImageViews();
 	createGBuffers();
@@ -64,6 +71,7 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createLights();
 	createDescriptorPool();
 	mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
+	// mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
 	createDescriptorSets();
 	createGraphicsCommandBuffers();
 	createComputeCommandBuffer();
@@ -107,8 +115,11 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 	}
 }
 
-void Renderer::reloadShaders()
+void Renderer::reloadShaders(size_t size)
 {
+	mCurrentTileSize = size;
+	mTileCount = { (WIDTH - 1) / size + 1, (HEIGHT - 1) / size + 1 };
+
 	vkDeviceWaitIdle(mContext.getDevice());
 
 	createGraphicsPipelines();
@@ -515,6 +526,9 @@ void Renderer::createDescriptorSetLayouts()
 		// unique clusters
 		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
 
+		// splitters
+		bindings.emplace_back(bindings.size(), vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+
 		vk::DescriptorSetLayoutCreateInfo createInfo;
 		createInfo.bindingCount = static_cast<uint32_t>(bindings.size());
 		createInfo.pBindings = bindings.data();
@@ -641,6 +655,20 @@ void Renderer::createGraphicsPipelines()
 		inputAssemblyInfo.topology = vk::PrimitiveTopology::eTriangleStrip;
 		inputAssemblyInfo.primitiveRestartEnable = VK_FALSE;
 
+		// create specialization constants
+		std::vector<vk::SpecializationMapEntry> entries;
+		entries.emplace_back(entries.size(), entries.size() * 4, 4); // Tile Size
+		entries.emplace_back(entries.size(), entries.size() * 4, 4); // Y_slices
+
+		float ySlices = std::log(1.0 + 2.0 / mTileCount.y);
+		std::vector<uint32_t> constantData = {static_cast<uint32_t>(mCurrentTileSize), *reinterpret_cast<uint32_t*>(&ySlices)};
+		
+		vk::SpecializationInfo specializationInfo;
+		specializationInfo.mapEntryCount = entries.size();
+		specializationInfo.pMapEntries = entries.data();
+		specializationInfo.dataSize = constantData.size() * 4;
+		specializationInfo.pData = constantData.data();
+
 		// shader stages
 		auto vertShader = mResource.shaderModule.add("data/composite.vert");
 		auto fragShader = mResource.shaderModule.add("data/composite.frag");
@@ -654,6 +682,7 @@ void Renderer::createGraphicsPipelines()
 		fragmentStageInfo.stage = vk::ShaderStageFlagBits::eFragment;
 		fragmentStageInfo.module = fragShader;
 		fragmentStageInfo.pName = "main";
+		fragmentStageInfo.pSpecializationInfo = &specializationInfo;
 
 		vk::PipelineShaderStageCreateInfo shaderStages[] = { vertexStageInfo, fragmentStageInfo };
 
@@ -1024,7 +1053,7 @@ void Renderer::createClusteredBuffers()
 	// key count / page size ... 2^24 / 2^9
 	
 	// page table
-	constexpr vk::DeviceSize pageTableSize = (32'768 + 1) * sizeof(uint32_t) + 32 - (32'769 * 4 % 0x20);
+	constexpr vk::DeviceSize pageTableSize = (32'768 + 3) * sizeof(uint32_t) + 32 - (32'771 * 4 % 0x20); // todo rewrite all this shit
 	mPageTableOffset = 0;
 	mPageTableSize = pageTableSize;
 
@@ -1038,7 +1067,7 @@ void Renderer::createClusteredBuffers()
 
 	// compacted clusters range
 	constexpr vk::DeviceSize compactedClustersSize = (2048 * sizeof(uint16_t)); // tile can have max 255 unique clusters + number of clusters
-	constexpr vk::DeviceSize compactedRangeSize = compactedClustersSize * TILE_COUNT_X * TILE_COUNT_Y + sizeof(uint16_t); // + cluster index counter
+	constexpr vk::DeviceSize compactedRangeSize = compactedClustersSize * 1024 + sizeof(uint16_t); // + cluster index counter
 	mUniqueClustersOffset = mPagePoolOffset + pagePoolSize;
 	mUniqueClustersSize = compactedRangeSize;
 
@@ -1047,25 +1076,29 @@ void Renderer::createClusteredBuffers()
 
 	mClusteredBuffer = mUtility.createBuffer(
 		bufferSize,
-		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndirectBuffer,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 }
 
 void Renderer::createLights()
 {
-	constexpr vk::DeviceSize lightsOutSize = sizeof(uint32_t) * (MAX_LIGHTS_PER_TILE + 1) * TILE_COUNT_X * TILE_COUNT_Y; // ... + 1 => storing light counter for tile
+	// constexpr vk::DeviceSize lightsOutSize = sizeof(uint32_t) * (MAX_LIGHTS_PER_TILE + 1) * TILE_COUNT_X * TILE_COUNT_Y; // ... + 1 => storing light counter for tile
 	constexpr vk::DeviceSize pointLightsSize = sizeof(PointLight) * MAX_POINTLIGHTS/* + sizeof(glm::vec4)*/; // ... + size of LightParams struct
-	constexpr vk::DeviceSize indirectionSize = pointLightsSize; // swap buffer
+	constexpr vk::DeviceSize indirectionSize = MAX_POINTLIGHTS * 8 * 5 * 4; // swap buffer // todo find right value
+	constexpr vk::DeviceSize lightsOutSize = indirectionSize; // ... + 1 => storing light counter for tile
+	constexpr vk::DeviceSize splittersSize = 1024 * sizeof(uint32_t) * 2;
 	mLightsOutOffset = 0;
 	mPointLightsOffset = lightsOutSize;
 	mLightsIndirectionOffset = mPointLightsOffset + pointLightsSize;
+	mSplittersOffset = mLightsIndirectionOffset + indirectionSize;
 
 	mLightsOutSize = lightsOutSize;
 	mPointLightsSize = pointLightsSize;
 	mLightsIndirectionSize = indirectionSize;
+	mSplittersSize = splittersSize;
 
-	constexpr vk::DeviceSize bufferSize = pointLightsSize + lightsOutSize + indirectionSize;
+	constexpr vk::DeviceSize bufferSize = pointLightsSize + lightsOutSize + indirectionSize + splittersSize;
 
 	// allocate buffer
 	mPointLightsStagingBuffer = mUtility.createBuffer(
@@ -1104,165 +1137,173 @@ void Renderer::createDescriptorPool()
 void Renderer::createDescriptorSets()
 {
 	std::vector<vk::WriteDescriptorSet> descriptorWrites;
-
+	
 	// world transform
+	vk::DescriptorBufferInfo transformBufferInfo;
+	transformBufferInfo.buffer = *mCameraUniformBuffer.handle;
+	transformBufferInfo.offset = 0;
+	transformBufferInfo.range = sizeof(CameraUBO);
 	{
 		vk::DescriptorSetAllocateInfo allocInfo;
 		allocInfo.descriptorPool = *mDescriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("camera");
-	
-		vk::DescriptorBufferInfo bufferInfo;
-		bufferInfo.buffer = *mCameraUniformBuffer.handle;
-		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(CameraUBO);
 
 		auto targetSet = mResource.descriptorSet.add("camera", allocInfo);
 
 		// refer to the uniform object buffer
-		auto write = util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, bufferInfo);
+		auto write = util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, transformBufferInfo);
 		descriptorWrites.emplace_back(write);
 	}
-
+	
 	// Model
+	vk::DescriptorBufferInfo modelBufferInfo;
+	modelBufferInfo.buffer = *mObjectUniformBuffer.handle;
+	modelBufferInfo.offset = 0;
+	modelBufferInfo.range = sizeof(ObjectUBO);
 	{
 		vk::DescriptorSetAllocateInfo allocInfo;
 		allocInfo.descriptorPool = *mDescriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("model");
 
-		vk::DescriptorBufferInfo bufferInfo;
-		bufferInfo.buffer = *mObjectUniformBuffer.handle;
-		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(ObjectUBO);
-
 		const auto targetSet = mResource.descriptorSet.add("model", allocInfo);
 
-		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, bufferInfo));
+		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, modelBufferInfo));
 	}
+	
+	// Light culling
+	vk::DescriptorBufferInfo pointLightsInfo;
+	pointLightsInfo.buffer = *mLightsBuffers.handle;
+	pointLightsInfo.offset = mPointLightsOffset;
+	pointLightsInfo.range = mPointLightsSize;
 
+	vk::DescriptorBufferInfo lightsOutInfo;
+	lightsOutInfo.buffer = *mLightsBuffers.handle;
+	lightsOutInfo.offset = mLightsOutOffset;
+	lightsOutInfo.range = mLightsOutSize;
+
+	vk::DescriptorBufferInfo lightsIndirectionInfo;
+	lightsIndirectionInfo.buffer = *mLightsBuffers.handle;
+	lightsIndirectionInfo.offset = mLightsIndirectionOffset;
+	lightsIndirectionInfo.range = mLightsIndirectionSize;
+
+	vk::DescriptorBufferInfo pageTableInfo;
+	pageTableInfo.buffer = *mClusteredBuffer.handle;
+	pageTableInfo.offset = mPageTableOffset;
+	pageTableInfo.range = mPageTableSize;
+
+	vk::DescriptorBufferInfo pagePoolInfo;
+	pagePoolInfo.buffer = *mClusteredBuffer.handle;
+	pagePoolInfo.offset = mPagePoolOffset;
+	pagePoolInfo.range = mPagePoolSize;
+
+	vk::DescriptorBufferInfo uniqueClustersInfo;
+	uniqueClustersInfo.buffer = *mClusteredBuffer.handle;
+	uniqueClustersInfo.offset = mUniqueClustersOffset;
+	uniqueClustersInfo.range = mUniqueClustersSize;
+
+	vk::DescriptorBufferInfo splittersInfo;
+	splittersInfo.buffer = *mLightsBuffers.handle;
+	splittersInfo.offset = mSplittersOffset;
+	splittersInfo.range = mSplittersSize;
+
+	vk::DescriptorImageInfo depthInfo;
+	depthInfo.sampler = *mGBufferAttachments.sampler;
+	depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	depthInfo.imageView = *mGBufferAttachments.depth.view;
 	{
-		vk::DescriptorBufferInfo pointLightsInfo;
-		pointLightsInfo.buffer = *mLightsBuffers.handle;
-		pointLightsInfo.offset = mPointLightsOffset;
-		pointLightsInfo.range = mPointLightsSize;
+		vk::DescriptorSetAllocateInfo allocInfo;
+		allocInfo.descriptorPool = *mDescriptorPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
 
-		vk::DescriptorBufferInfo lightsOutInfo;
-		lightsOutInfo.buffer = *mLightsBuffers.handle;
-		lightsOutInfo.offset = mLightsOutOffset;
-		lightsOutInfo.range = mLightsOutSize;
+		auto targetSet = mResource.descriptorSet.add("lightculling_01", allocInfo);
 
-		vk::DescriptorBufferInfo lightsIndirectionInfo;
-		lightsIndirectionInfo.buffer = *mLightsBuffers.handle;
-		lightsIndirectionInfo.offset = mLightsIndirectionOffset;
-		lightsIndirectionInfo.range = mLightsIndirectionSize;
+		std::vector<vk::WriteDescriptorSet> writes;
 
-		vk::DescriptorBufferInfo pageTableInfo;
-		pageTableInfo.buffer = *mClusteredBuffer.handle;
-		pageTableInfo.offset = mPageTableOffset;
-		pageTableInfo.range = mPageTableSize;
+		uint32_t binding = 0;
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pointLightsInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsOutInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsIndirectionInfo));
+		writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, depthInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pageTableInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pagePoolInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, uniqueClustersInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, splittersInfo));
 
-		vk::DescriptorBufferInfo pagePoolInfo;
-		pagePoolInfo.buffer = *mClusteredBuffer.handle;
-		pagePoolInfo.offset = mPagePoolOffset;
-		pagePoolInfo.range = mPagePoolSize;
+		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 
-		vk::DescriptorBufferInfo uniqueClustersInfo;
-		uniqueClustersInfo.buffer = *mClusteredBuffer.handle;
-		uniqueClustersInfo.offset = mUniqueClustersOffset;
-		uniqueClustersInfo.range = mUniqueClustersSize;
+		// swapped light buffers
+		targetSet = mResource.descriptorSet.add("lightculling_10", allocInfo);
+		for (auto& item : writes)
+			item.dstSet = targetSet;
 
-		vk::DescriptorImageInfo depthInfo;
-		depthInfo.sampler = *mGBufferAttachments.sampler;
-		depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-		depthInfo.imageView = *mGBufferAttachments.depth.view;
+		std::swap(writes[1].dstBinding, writes[2].dstBinding);
+	
+		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
+	}
+	
+	// composition
+	vk::DescriptorImageInfo positionInfo;
+	positionInfo.sampler = *mGBufferAttachments.sampler;
+	positionInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	positionInfo.imageView = *mGBufferAttachments.position.view;
 
-		// Light culling
-		{
-			vk::DescriptorSetAllocateInfo allocInfo;
-			allocInfo.descriptorPool = *mDescriptorPool;
-			allocInfo.descriptorSetCount = 1;
-			allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
+	vk::DescriptorImageInfo albedoInfo;
+	albedoInfo.sampler = *mGBufferAttachments.sampler;
+	albedoInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	albedoInfo.imageView = *mGBufferAttachments.color.view;
 
-			auto targetSet = mResource.descriptorSet.add("lightculling_01", allocInfo);
+	vk::DescriptorImageInfo normalInfo;
+	normalInfo.sampler = *mGBufferAttachments.sampler;
+	normalInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	normalInfo.imageView = *mGBufferAttachments.normal.view;
+	{
+		vk::DescriptorSetAllocateInfo allocInfo;
+		allocInfo.descriptorPool = *mDescriptorPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("composition");
 
-			std::vector<vk::WriteDescriptorSet> writes;
+		auto targetSet = mResource.descriptorSet.add("composition_01", allocInfo);
 
-			uint32_t binding = 0;
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pointLightsInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsOutInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsIndirectionInfo));
-			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, depthInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pageTableInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pagePoolInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, uniqueClustersInfo));
+		std::vector<vk::WriteDescriptorSet> writes;
 
-			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
-
-			// swapped light buffers
-			targetSet = mResource.descriptorSet.add("lightculling_10", allocInfo);
-			for (auto& item : writes)
-				item.dstSet = targetSet;
-
-			std::swap(writes[1].dstBinding, writes[2].dstBinding);
+		uint32_t binding = 0;
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pointLightsInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsOutInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsIndirectionInfo));
+		writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, positionInfo));
+		writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, albedoInfo));
+		writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, normalInfo));
+		writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, depthInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pageTableInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pagePoolInfo));
+		writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, uniqueClustersInfo));
 		
-			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
-		}
+		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
+		
+		// swapped light buffers
+		targetSet = mResource.descriptorSet.add("composition_10", allocInfo);
+		for (auto& item : writes)
+			item.dstSet = targetSet;
 
-		// composition
-		{
-			vk::DescriptorSetAllocateInfo allocInfo;
-			allocInfo.descriptorPool = *mDescriptorPool;
-			allocInfo.descriptorSetCount = 1;
-			allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("composition");
-
-			auto targetSet = mResource.descriptorSet.add("composition", allocInfo);
-
-			vk::DescriptorImageInfo positionInfo;
-			positionInfo.sampler = *mGBufferAttachments.sampler;
-			positionInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			positionInfo.imageView = *mGBufferAttachments.position.view;
-
-			vk::DescriptorImageInfo albedoInfo;
-			albedoInfo.sampler = *mGBufferAttachments.sampler;
-			albedoInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			albedoInfo.imageView = *mGBufferAttachments.color.view;
-
-			vk::DescriptorImageInfo normalInfo;
-			normalInfo.sampler = *mGBufferAttachments.sampler;
-			normalInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-			normalInfo.imageView = *mGBufferAttachments.normal.view;
-
-			std::vector<vk::WriteDescriptorSet> writes;
-
-			uint32_t binding = 0;
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pointLightsInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsOutInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, lightsIndirectionInfo));
-			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, positionInfo));
-			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, albedoInfo));
-			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, normalInfo));
-			writes.emplace_back(util::createDescriptorWriteImage(targetSet, binding++, depthInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pageTableInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, pagePoolInfo));
-			writes.emplace_back(util::createDescriptorWriteBuffer(targetSet, binding++, vk::DescriptorType::eStorageBuffer, uniqueClustersInfo));
-			
-			descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
-		}
+		std::swap(writes[1].dstBinding, writes[2].dstBinding);
+	
+		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 	}
 
 	// debug
+	vk::DescriptorBufferInfo uboInfo;
+	uboInfo.buffer = *mDebugUniformBuffer.handle;
+	uboInfo.offset = 0;
+	uboInfo.range = mDebugUniformBuffer.size;
 	{
 		vk::DescriptorSetAllocateInfo allocInfo;
 		allocInfo.descriptorPool = *mDescriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("debug");
-
-		vk::DescriptorBufferInfo uboInfo;
-		uboInfo.buffer = *mDebugUniformBuffer.handle;
-		uboInfo.offset = 0;
-		uboInfo.range = mDebugUniformBuffer.size;
-
+		
 		auto targetSet = mResource.descriptorSet.add("debug", allocInfo);
 		
 		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, uboInfo));
@@ -1352,22 +1393,22 @@ void Renderer::createGraphicsCommandBuffers()
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eRenderPassContinue;
 		beginInfo.pInheritanceInfo = &inheritanceInfo;
 
-		// record command buffers
-		for (auto& cmd : mCompositionCommandBuffers)
-		{
-			cmd->begin(beginInfo);
-			cmd->bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("composition"));
-
-			std::array<vk::DescriptorSet, 2> descriptorSets = {
-				mResource.descriptorSet.get("camera"),
-				mResource.descriptorSet.get("composition")
-			};
-
-			cmd->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("composition"), 0, descriptorSets, nullptr);
-			cmd->draw(4, 1, 0, 0);
-
-			cmd->end();
-		}
+		// // record command buffers
+		// for (auto& cmd : mCompositionCommandBuffers)
+		// {
+		// 	cmd->begin(beginInfo);
+		// 	cmd->bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("composition"));
+		//
+		// 	std::array<vk::DescriptorSet, 2> descriptorSets = {
+		// 		mResource.descriptorSet.get("camera"),
+		// 		mResource.descriptorSet.get("composition")
+		// 	};
+		//
+		// 	cmd->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("composition"), 0, descriptorSets, nullptr);
+		// 	cmd->draw(4, 1, 0, 0);
+		//
+		// 	cmd->end();
+		// }
 	}
 
 	// debug
@@ -1398,7 +1439,7 @@ void Renderer::createGraphicsCommandBuffers()
 			
 			std::array<vk::DescriptorSet, 2> descriptorSets = {
 				mResource.descriptorSet.get("debug"),
-				mResource.descriptorSet.get("composition"),
+				mResource.descriptorSet.get("composition_01"),
 			};
 			
 			cmd->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("debug"), 0, descriptorSets, nullptr);
@@ -1437,12 +1478,32 @@ void Renderer::createComputePipeline()
 	layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 	layoutInfo.pSetLayouts = setLayouts.data();
 
-	mResource.pipelineLayout.add("lightculling", layoutInfo);
+	mResource.pipelineLayout.add("pageflag", layoutInfo);
+
+	// create specialization constants
+	std::vector<vk::SpecializationMapEntry> entries;
+	entries.emplace_back(entries.size(), entries.size() * 4, 4); // Tile Size
+	entries.emplace_back(entries.size(), entries.size() * 4, 4); // Y_slices
+	entries.emplace_back(entries.size(), entries.size() * 4, 4); // WG size
+
+	uint32_t groupSize = mCurrentTileSize <= 32 ? mCurrentTileSize : 32;
+	float ySlices = std::log(1.0 + 2.0 / mTileCount.y);
+	std::vector<uint32_t> constantData = {
+		static_cast<uint32_t>(mCurrentTileSize), 
+		*reinterpret_cast<uint32_t*>(&ySlices),
+		groupSize,
+	};
+	
+	vk::SpecializationInfo specializationInfo;
+	specializationInfo.mapEntryCount = entries.size();
+	specializationInfo.pMapEntries = entries.data();
+	specializationInfo.dataSize = constantData.size() * 4;
+	specializationInfo.pData = constantData.data();
 
 	vk::PipelineShaderStageCreateInfo stageInfo;
 	stageInfo.stage = vk::ShaderStageFlagBits::eCompute;
 	stageInfo.pName = "main";
-
+	stageInfo.pSpecializationInfo = &specializationInfo;
 
 	// page flag
 	{
@@ -1450,23 +1511,70 @@ void Renderer::createComputePipeline()
 
 		vk::ComputePipelineCreateInfo pipelineInfo;
 		pipelineInfo.stage = stageInfo;
-		pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
+		pipelineInfo.layout = mResource.pipelineLayout.get("pageflag");
 		pipelineInfo.basePipelineIndex = -1;
 
 		mResource.pipeline.add("pageflag", *mPipelineCache, pipelineInfo);
 	}
 
 	auto pipelineBase = mResource.pipeline.get("pageflag");
-	for (const auto& name : { "pagealloc", "pagestore", "pagecompact", "lightculling", "sort_bitonic" })
+	for (const auto& name : { "pagealloc", "pagestore", "pagecompact", "sort_bitonic"/*, "sort_splitters"*/ })
 	{
 		stageInfo.module = mResource.shaderModule.add(std::string("data/" ) + name + ".comp");
 
 		vk::ComputePipelineCreateInfo pipelineInfo;
 		pipelineInfo.stage = stageInfo;
-		pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
+		pipelineInfo.layout = mResource.pipelineLayout.get("pageflag");
 		pipelineInfo.basePipelineHandle = pipelineBase;
 
 		mResource.pipeline.add(name, *mPipelineCache, pipelineInfo);
+	}
+
+	// merge bitonic (push constants needed)
+	vk::PushConstantRange pushConstantRange;
+	pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eCompute;
+	pushConstantRange.size = sizeof(uint32_t);
+	
+	layoutInfo.pPushConstantRanges = &pushConstantRange;
+	layoutInfo.pushConstantRangeCount = 1;
+	mResource.pipelineLayout.add("bitonic_merge", layoutInfo);
+	{
+		stageInfo.module = mResource.shaderModule.add(std::string("data/sort_mergeBitonic.comp"));
+	
+		vk::ComputePipelineCreateInfo pipelineInfo;
+		pipelineInfo.stage = stageInfo;
+		pipelineInfo.layout = mResource.pipelineLayout.get("bitonic_merge");
+		pipelineInfo.basePipelineHandle = pipelineBase;
+	
+		mResource.pipeline.add("sort_mergeBitonic", *mPipelineCache, pipelineInfo);
+	}
+
+	// lightculling
+	pushConstantRange.size = 11 * sizeof(uint32_t);	
+	mResource.pipelineLayout.add("lightculling", layoutInfo);
+	{
+		stageInfo.module = mResource.shaderModule.add(std::string("data/lightculling.comp"));
+	
+		vk::ComputePipelineCreateInfo pipelineInfo;
+		pipelineInfo.stage = stageInfo;
+		pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
+		pipelineInfo.basePipelineHandle = pipelineBase;
+	
+		mResource.pipeline.add("lightculling", *mPipelineCache, pipelineInfo);
+	}
+
+	// bvh
+	pushConstantRange.size = 3 * sizeof(uint32_t);
+	mResource.pipelineLayout.add("bvh", layoutInfo);
+	{
+		stageInfo.module = mResource.shaderModule.add(std::string("data/bvh.comp"));
+	
+		vk::ComputePipelineCreateInfo pipelineInfo;
+		pipelineInfo.stage = stageInfo;
+		pipelineInfo.layout = mResource.pipelineLayout.get("bvh");
+		pipelineInfo.basePipelineHandle = pipelineBase;
+	
+		mResource.pipeline.add("bvh", *mPipelineCache, pipelineInfo);
 	}
 }
 
@@ -1493,6 +1601,9 @@ void Renderer::createComputeCommandBuffer()
 		barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
+		vk::MemoryBarrier indirectBarrier = barrier;
+		indirectBarrier.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead;
+
 		std::array<vk::DescriptorSet, 2> descriptorSets{ 
 			mResource.descriptorSet.get("camera"),
 			mResource.descriptorSet.get("lightculling_01")
@@ -1508,38 +1619,36 @@ void Renderer::createComputeCommandBuffer()
 			auto& cmd = *mSecondaryLightCullingCommandBuffers[0];
 			cmd.begin(beginInfo);
 
-				cmd.fillBuffer(*mClusteredBuffer.handle, 0, VK_WHOLE_SIZE, 0);
-				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion , nullptr, nullptr, nullptr);
-
-				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
-
+				cmd.fillBuffer(*mClusteredBuffer.handle, 0, VK_WHOLE_SIZE, 0); // todo weird barrier
+				
+				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion , nullptr, nullptr, nullptr); 
+				cmd.fillBuffer(*mClusteredBuffer.handle, mPageTableOffset + 4, 8, 1);
+				cmd.fillBuffer(*mClusteredBuffer.handle, mUniqueClustersOffset, 16, 1);
+				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 0, descriptorSets, nullptr);
+				
 				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pageflag"));
-				cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
-
+				cmd.dispatch(mTileCount.x, mTileCount.y, 1);
+				
 				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
 				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagealloc"));
-				cmd.dispatch(1, 1, 1);
+				cmd.dispatch(64, 1, 1);
 				
 				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
 				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagestore"));
-				cmd.dispatch(TILE_COUNT_X, TILE_COUNT_Y, 1);
-				
-				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagecompact"));
-				cmd.dispatch(40, 1, 1);
+				cmd.dispatch(mTileCount.x, mTileCount.y, 1);
 
+				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlagBits::eByRegion, indirectBarrier, nullptr, nullptr);
+				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("pagecompact"));
+				// cmd.dispatch(40, 1, 1); // TODO 1 smth to 1 WG
+				cmd.dispatchIndirect(*mClusteredBuffer.handle, mPageTableOffset);
 			cmd.end();
 		}
 
 		{
 			auto &cmd = *mSecondaryLightCullingCommandBuffers[1];
 			cmd.begin(beginInfo);
+				
 
-				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
-
-				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-				cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
-				cmd.dispatch(30, 1, 1);
 
 			cmd.end();
 		}
@@ -1579,14 +1688,21 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 {	
 	mLightsCount = BaseApp::getInstance().getUI().mContext.lightsCount;
 	auto memorySize = sizeof(PointLight) * mLightsCount + sizeof(glm::vec4);
-	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize));
+	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize + 8192));
 
 	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {WIDTH, HEIGHT} };
 	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
+
+	std::uniform_int_distribution<uint32_t> distribution(0, mLightsCount - 1);
+	static std::minstd_rand generator(reinterpret_cast<unsigned>(&distribution));
+	for (size_t i = 0; i < 1024; i++)
+		reinterpret_cast<uint32_t*>(lightBuffer + memorySize)[i * 2 + 1] = distribution(generator);
+
 	mContext.getDevice().unmapMemory(*mPointLightsStagingBuffer.memory);
 
 	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset); // TODO use transfer queue
 	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, sizeof(glm::vec4), 0, mLightsIndirectionOffset); // TODO use transfer queue
+	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, 8192, memorySize, mSplittersOffset); // TODO use transfer queue
 }
 
 void Renderer::drawFrame()
@@ -1636,112 +1752,7 @@ void Renderer::drawFrame()
 	if (BaseApp::getInstance().getUI().getDebugIndex() == DebugStates::disabled)
 	{
 		// submit light culling
-		{
-			auto& cmd = *mPrimaryLightCullingCommandBuffer[imageIndex];
-			
-			// build light culling cmd
-			{
-
-				std::array<vk::DescriptorSet, 2> descriptorSets{ 
-			mResource.descriptorSet.get("camera"),
-			mResource.descriptorSet.get("lightculling_01")
-				};
-
-				vk::MemoryBarrier barrier;
-				barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-				barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-
-				// record 
-				cmd.begin(vk::CommandBufferBeginInfo{});
-				cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[0]);
-				
-				// light sorting
-				{
-					size_t lightWindowsCount = (1023 + mLightsCount) >> 10;
-
-					// cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 0, descriptorSets, nullptr);
-					//
-					// cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_bitonic"));
-					// cmd.dispatch(lightWindowsCount, 1, 1);
-					// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-
-					if (mLightsCount > 256)
-					{
-						// todo remove this
-						// cmd.fillBuffer(*mLightsBuffers.handle, mLightsIndirectionOffset, mLightsIndirectionSize, 0);
-						// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-
-					// 	std::string mLightBufferSwapUsed = "lightculling_01";
-					// 	for (size_t i = lightWindowsCount; i > 1; i = (i + 1) >> 1) 
-					// 	{
-					// 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("lightculling"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
-					//
-					// 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_splitterSort2_8"));
-					// 		cmd.dispatch(1, 1, 1);
-					// 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-					//
-					// 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_mergeSeq"));
-					// 		cmd.dispatch((lightWindowsCount + 1) >> 1, 1, 1);
-					//
-					// 		if (i > 2 || mLightBufferSwapUsed == "lightculling_01")
-					// 			cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-					// 		
-					// 		mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
-					// 	}
-					//
-					// 	if (mLightBufferSwapUsed == "lightculling_10")
-					// 	{
-					// 		vk::DeviceSize size = (mLightsCount + 1) * sizeof(PointLight) - sizeof(glm::vec4);
-					//
-					// 		vk::BufferCopy copy;
-					// 		copy.srcOffset = mLightsIndirectionOffset + sizeof(glm::vec4);
-					// 		copy.dstOffset = mPointLightsOffset + sizeof(glm::vec4);
-					// 		copy.size = size;
-					//
-					// 		vk::BufferMemoryBarrier barrier;
-					// 		barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-					// 		barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-					// 		barrier.size = size;
-					// 		barrier.offset = mLightsIndirectionOffset + sizeof(glm::vec4);
-					// 		barrier.buffer = *mLightsBuffers.handle;
-					//
-					// 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
-					// 		cmd.copyBuffer(*mLightsBuffers.handle, *mLightsBuffers.handle, copy);
-					//
-					// 		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-					// 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-					// 		barrier.offset = mPointLightsOffset + sizeof(glm::vec4);
-					//
-					// 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
-					// 		
-					//
-					// 		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-					// 	}
-					}
-
-
-
-					// cmd.dispatch(1, 1, 1);
-					// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-				}
-
-				cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[1]);
-				cmd.end();
-			}
-			vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eComputeShader;
-
-			vk::SubmitInfo submitInfo;
-			submitInfo.waitSemaphoreCount = 1;
-			submitInfo.pWaitSemaphores = &*mGBufferFinishedSemaphore;
-			submitInfo.pWaitDstStageMask = &waitStages;
-			submitInfo.commandBufferCount = 1;
-			submitInfo.pCommandBuffers = &cmd;
-			submitInfo.signalSemaphoreCount = 1;
-			submitInfo.pSignalSemaphores = &*mLightCullingFinishedSemaphore;
-
-			mContext.getComputeQueue().submit(submitInfo, nullptr); // TODO compute queue in graphics queue
-		}
+		submitLightCullingCmds(imageIndex);
 
 		// build composition
 		{
@@ -1750,7 +1761,12 @@ void Renderer::drawFrame()
 			renderpassInfo.framebuffer = *mSwapchainFramebuffers[imageIndex];
 			renderpassInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
 			renderpassInfo.renderArea.extent = mSwapchainExtent;
-
+			
+			std::array<vk::DescriptorSet, 2> descriptorSets = {
+				mResource.descriptorSet.get("camera"),
+				mResource.descriptorSet.get(mLightBufferSwapUsed == "lightculling_01" ? "composition_01" : "composition_10")
+			};
+			
 			std::array<vk::ClearValue, 1> clearValues;
 			clearValues[0].color.setFloat32({ 1.0f, 0.8f, 0.4f, 1.0f });
 
@@ -1760,8 +1776,13 @@ void Renderer::drawFrame()
 			auto& cmd = *mPrimaryCompositionCommandBuffers[imageIndex];
 
 			cmd.begin(vk::CommandBufferBeginInfo{});
-			cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
-			cmd.executeCommands(1, &*mCompositionCommandBuffers[imageIndex]);
+			cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
+
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("composition"));
+			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("composition"), 0, descriptorSets, nullptr);
+			cmd.draw(4, 1, 0, 0);
+
+			// cmd.executeCommands(1, &*mCompositionCommandBuffers[imageIndex]);
 			cmd.nextSubpass(vk::SubpassContents::eSecondaryCommandBuffers);
 			cmd.executeCommands(1, &*BaseApp::getInstance().getUI().getCommandBuffer());
 			cmd.endRenderPass();
@@ -1844,5 +1865,195 @@ void Renderer::drawFrame()
 			throw std::runtime_error("Failed to present swap chain image");
 	}
 
+	mContext.getDevice().waitIdle();
 	mCurrentFrame = (mCurrentFrame + 1) % mSwapchainImages.size();
+}
+
+void Renderer::submitLightCullingCmds(size_t imageIndex)
+{
+	auto& cmd = *mPrimaryLightCullingCommandBuffer[imageIndex];
+
+	std::array<vk::DescriptorSet, 2> descriptorSets{ 
+mResource.descriptorSet.get("camera"),
+mResource.descriptorSet.get("lightculling_01")
+	};
+
+	vk::MemoryBarrier barrier;
+	barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+	barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+	std::array<uint32_t, 30> pcLeaves;
+	
+	std::vector<std::pair<uint32_t, uint32_t>> levelParam;
+	levelParam.reserve(6);
+
+	uint32_t maxLevel;
+	mLightBufferSwapUsed = "lightculling_01";
+
+	// record 
+	cmd.begin(vk::CommandBufferBeginInfo{});
+	cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[0]);
+	
+	// light sorting
+	{
+		size_t lightWindowsCount = (1023 + mLightsCount) >> 10;
+
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 0, descriptorSets, nullptr);	
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_bitonic"));
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		cmd.dispatch(lightWindowsCount, 1, 1);
+
+		// splitters
+		// cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_splitters"));
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		// cmd.dispatch(1, 1, 1);
+		
+		if (mLightsCount > 128)
+		{
+			// todo remove this
+			// cmd.fillBuffer(*mLightsBuffers.handle, mLightsIndirectionOffset, mLightsIndirectionSize, 0);
+			
+
+			cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_mergeBitonic"));
+			
+			for (size_t i = 0; mLightsCount > (128u << i); i++)
+			{
+				size_t mergeCount = (mLightsCount - 1) / ((256 / mSubGroupSize) * (256 << i)) + 1; // every warp merges 256^i items
+				pcLeaves[i] = i + 1;
+			
+				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
+				cmd.pushConstants(mResource.pipelineLayout.get("bitonic_merge"), vk::ShaderStageFlagBits::eCompute, 0, 4, &pcLeaves[i]);
+
+				// first time barrier is not neede - async splitters
+				if (i >= 0)	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				cmd.dispatch(mergeCount, 1, 1);
+				
+				mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
+			}
+
+			// if (mLightBufferSwapUsed == "lightculling_10")
+			// {
+			// 	vk::DeviceSize size = mLightsCount * 8;
+			//
+			// 	vk::BufferCopy copy;
+			// 	copy.srcOffset = mLightsOutOffset;
+			// 	copy.dstOffset = mLightsIndirectionOffset;
+			// 	copy.size = size;
+			//
+			// 	vk::BufferMemoryBarrier barrier;
+			// 	barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+			// 	barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+			// 	barrier.size = size;
+			// 	barrier.offset = mLightsOutOffset;
+			// 	barrier.buffer = *mLightsBuffers.handle;
+			//
+			// 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
+			// 	cmd.copyBuffer(*mLightsBuffers.handle, *mLightsBuffers.handle, copy);
+			//
+			// 	barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+			// 	barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+			// 	barrier.offset = mLightsIndirectionOffset;
+			//
+			// 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
+			// 	
+			//
+			// 	// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+			// }
+		}		
+		
+		mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
+	}
+
+	// BVH
+	{
+		auto& layout = mResource.pipelineLayout.get("bvh");
+		levelParam.emplace_back(mLightsCount, 0);
+		const uint32_t subgroupAlignedLightCount = ((mLightsCount - 1) / mSubGroupSize + 1) * mSubGroupSize - 1;
+
+		struct
+		{
+			uint32_t count;
+			uint32_t offset;
+			uint32_t nextOffset;
+		} pc = {
+			mLightsCount,
+			0,
+			subgroupAlignedLightCount / 6 + 1,
+		};
+		
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("bvh"));
+		cmd.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		cmd.dispatch((mLightsCount - 1) / 512 + 1, 1, 1);
+
+		maxLevel = (mLightsCount > mSubGroupSize) ? 1 : 0;
+		levelParam.emplace_back((mLightsCount - 1) / mSubGroupSize + 1, pc.nextOffset);
+		
+		while (levelParam.back().first > mSubGroupSize)
+		{
+			glm::uint32 newCount = (levelParam.back().first - 1) / mSubGroupSize + 1;
+			pc = {
+				levelParam.back().first,
+				pc.nextOffset,
+				pc.nextOffset + levelParam.back().first
+			};
+
+			levelParam.emplace_back(newCount, pc.nextOffset);
+			maxLevel++;
+			
+			cmd.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
+			cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+			cmd.dispatch((pc.count - 1) / 512 + 1, 1, 1);
+		}
+	}
+
+	// light culling
+	{
+		uint32_t data = 0;
+		auto buffer = (mLightBufferSwapUsed == "lightculling_01") ? mLightsOutOffset : mLightsIndirectionOffset; // TODO rewrite this shit
+	
+		vk::BufferMemoryBarrier before;
+		before.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+		before.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+		before.size = 4;
+		before.offset = buffer;
+		before.buffer = *mLightsBuffers.handle;
+	
+		vk::BufferMemoryBarrier after = before;
+		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		after.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead;
+	
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, before, nullptr);
+		cmd.updateBuffer(*mLightsBuffers.handle, buffer, 4, &data);
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlagBits::eByRegion, nullptr, after, nullptr);
+		
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
+		// cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
+		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 0, 4, &maxLevel);
+		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 4, levelParam.size() * 8, levelParam.data());
+		cmd.dispatchIndirect(*mClusteredBuffer.handle, mUniqueClustersOffset + 4);
+		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+	}
+
+	// cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[1]);
+	cmd.end();
+	
+	vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eComputeShader;
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = &*mGBufferFinishedSemaphore;
+	submitInfo.pWaitDstStageMask = &waitStages;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &cmd;
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &*mLightCullingFinishedSemaphore;
+
+	mContext.getComputeQueue().submit(submitInfo, nullptr); // TODO compute queue in graphics queue
+}
+
+void Renderer::submitLightSortingCmds(size_t imageIndex)
+{
+	
 }

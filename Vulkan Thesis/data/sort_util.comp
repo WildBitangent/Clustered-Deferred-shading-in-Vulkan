@@ -1,93 +1,20 @@
-
-
 uint expandBits(uint v)
 {
-    v = (v * 0x00010001) & 0xFF0000FF;
-    v = (v * 0x00000101) & 0x0F00F00F;
-    v = (v * 0x00000011) & 0xC30C30C3;
-    v = (v * 0x00000005) & 0x49249249;
-    return v;
+	v = (v * 0x00010001) & 0xFF0000FF;
+	v = (v * 0x00000101) & 0x0F00F00F;
+	v = (v * 0x00000011) & 0xC30C30C3;
+	v = (v * 0x00000005) & 0x49249249;
+	return v;
 }
 
 uint morton3D(vec3 pos)
 {
 	// normalize negative coords to 0-512
-    pos.x = min(max(pos.x + 512.0f, 0.0f), 1023.0f);
-    pos.y = min(max(pos.y + 512.0f, 0.0f), 1023.0f);
-    pos.z = min(max(pos.z + 512.0f, 0.0f), 1023.0f);
-    uint xx = expandBits(uint(pos.x));
-    uint yy = expandBits(uint(pos.y));
-    uint zz = expandBits(uint(pos.z));
-    return xx * 4 + yy * 2 + zz;
+	pos.x = min(max(pos.x + 512.0f, 0.0f), 1023.0f);
+	pos.y = min(max(pos.y + 512.0f, 0.0f), 1023.0f);
+	pos.z = min(max(pos.z + 512.0f, 0.0f), 1023.0f);
+	uint xx = expandBits(uint(pos.x));
+	uint yy = expandBits(uint(pos.y));
+	uint zz = expandBits(uint(pos.z));
+	return xx * 4 + yy * 2 + zz;
 }
-
-void mergeSort(uint itemID)
-{
-	uint tid = gl_LocalInvocationIndex; // index in workgroup
-
-	// Now we will merge sub-sequences of length 1,2,...,WG/2
-	for (uint length = 1; length < LOCAL_SIZE; length <<= 1)
-	{
-		uint iKey = mortons[tid];
-		uint index = indices[tid];
-
-		uint ii = tid & (length - 1);  // index in our sequence in 0..length-1
-		uint sibling = (tid - ii) ^ length; // beginning of the sibling sequence
-		uint pos = 0;
-
-		for (uint inc = length; inc > 0; inc >>= 1) // increment for dichotomic search
-		{
-			uint j = sibling + pos + inc - 1;
-			uint jKey = mortons[j];
-
-			bool smaller = (jKey < iKey) || (jKey == iKey && j < tid);
-			pos += (smaller) ? inc : 0;
-			pos = min(pos, length);
-		}
-
-		uint bits = 2 * length - 1; // mask for destination
-		uint dest = ((ii + pos) & bits) | (tid & ~bits); // destination index in merged sequence
-
-		barrier();
-
-		mortons[dest] = iKey;
-		indices[dest] = index;
-
-		barrier();
-	}
-
-	uint index = indices[tid];
-	barrier();
-
-	indices[index] = itemID;
-	barrier();
-}
-
-// void bitonicSort()
-// {
-// 	uint tid = gl_LocalInvocationIndex;
-
-// 	// Loop on sorted sequence length
-// 	for (uint length = 1; length < LOCAL_SIZE; length <<= 1)
-// 	{
-// 		bool direction = ((tid & (length << 1)) != 0); // direction of sort: 0=asc, 1=desc
-
-// 		// Loop on comparison distance (between keys)
-// 		for (uint inc = length; inc > 0; inc >>= 1)
-// 		{
-// 			uint j = tid ^ inc; // sibling to compare
-
-// 			uint iKey = mortons[tid];
-// 			uint jKey = mortons[j];
-
-// 			bool smaller = (jKey < iKey) || (jKey == iKey && j < tid);
-// 			bool swap = bool(uint(smaller) ^ uint(j < tid) ^ uint(direction));
-			
-// 			barrier();
-			
-// 			mortons[tid] = (swap) ? jKey : iKey;
-			
-// 			barrier();
-// 		}
-// 	}
-// }

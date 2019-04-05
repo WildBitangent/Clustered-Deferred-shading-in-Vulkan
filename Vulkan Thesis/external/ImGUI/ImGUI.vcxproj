@@ -103,7 +103,7 @@
     <LinkIncremental>false</LinkIncremental>
     <TargetName>$(ProjectName)_$(Platform)</TargetName>
     <OutDir>$(ProjectDir)lib\</OutDir>
-    <IncludePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;$(IncludePath)</IncludePath>
+    <IncludePath>D:\Vulkan SDKs\GLFW\include;C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\include;$(IncludePath)</IncludePath>
     <SourcePath>C:\Visual Studio Projects\Vulkan Thesis\Vulkan Thesis\external\ImGUI\src;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

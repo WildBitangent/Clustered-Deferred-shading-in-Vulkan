@@ -38,9 +38,12 @@ public:
 	{
 		DebugStates debugState = DebugStates::disabled;
 		bool debugUniformDirtyBit = false;
+		bool shaderReloadDirtyBit = false;
 
-		int lightsCount = 1;
-		bool lightsAnimation = true;
+		int lightsCount = 32768;
+		int tileSize = 2;
+		bool lightsAnimation = false;
+		bool vSync = true;
 	} mContext;
 
 public:

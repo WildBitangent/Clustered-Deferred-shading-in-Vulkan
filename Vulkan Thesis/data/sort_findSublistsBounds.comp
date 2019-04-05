@@ -1,0 +1,185 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_control_flow_attributes : require
+
+// ------------- STRUCTS -------------
+#include "structs.inl"
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	uvec3 lightCount_screenSize;
+	uint pad;
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 7) writeonly buffer Splitters
+{
+	uint splitters[];
+};
+
+layout(std430, set = 1, binding = 1) writeonly buffer Swap
+{
+	Key data[];
+} swap;
+
+layout(std430, set = 1, binding = 2) readonly buffer Lights
+{
+	Key data[];
+} lights;
+
+layout(std430, set = 1, binding = 2) writeonly buffer SplittersWrite
+{
+	uint splitOut[];
+};
+
+layout(push_constant) uniform pushConstants 
+{
+	uint listLength; // todo last list length unique dispatch
+	uint lastListLength;
+	uint storeOffset;
+	uint listCount;
+};
+
+shared uint lengths[128]; // max lists count
+shared uint temp[128]; // todo name this
+shared uint sublistSums[4];
+
+layout(local_size_x = 1024) in; 
+void main()
+{	
+	uint length = (gl_WorkgroupID.x < gl_NumWorkgroups.x - 1) ? listLength : lastListLength;
+
+	for (uint i = gl_SubgroupID; i < 128; i += gl_NumSubgroups)
+	{
+		uint pivot = (length >> 7) * (i + 1) - 1;
+		uint splitter = splitters[i];
+
+		bool condition = lights.data[pivot + gl_WorkgroupID.x * listLength + gl_SubgroupInvocationID].mortonCode <= splitter;
+		int direction;
+		if (subgroupAll(condition))
+			direction = 1;
+		else if (subgroupAll(!condition)) 
+			direction = -1;
+		else
+			direction = 0; // we found right split 
+
+		while(direction != 0)
+		{
+			bool lastCondition = condition;
+
+			if (direction > 0) // going up
+			{
+				uint next = pivot + gl_SubgroupSize;
+				if (next == length)
+					break;
+
+				pivot = (next > length) ? length - gl_SubgroupSize : next;
+				condition = lights.data[pivot + gl_SubgroupInvocationID].mortonCode <= splitter;
+			}
+			else // going down
+			{
+				if (pivot == 0)
+					break;
+
+				pivot = (pivot < gl_SubgroupSize) ? 0 : pivot - gl_SubgroupSize;
+				condition = lights.data[pivot + gl_SubgroupInvocationID].mortonCode > splitter;
+			}
+
+			if (!subgroupAll(condition))
+			{
+				// last item was in previous run
+				if (subgroupAll(!condition))
+				{
+					condition = lastCondition;
+					pivot -= (direction > 0) ? gl_SubgroupSize : -gl_SubgroupSize;
+				}
+
+				break;
+			}
+		}
+
+		uint index = pivot + subgroupBallotBitCount(subgroupBallot(condition));
+		if (subgroupElect())
+		{
+			lengths[i] = index;
+			splitOut[storeOffset + (gl_NumWorkgroups.x << 1) + 128 + gl_WorkgroupID.x + (i << 7)] = index;
+		}
+	}
+	
+	barrier();
+
+	uint tid = gl_LocalInvocationIndex;
+	if (tid < 128)
+	{
+		uint index = storeOffset + (gl_WorkgroupID.x << 7) + tid;
+
+		if (tid < listsCount)
+			temp[tid] = (tid == 0) ? lengths[tid] : lengths[tid] - lengths[tid - 1];
+		else
+			temp[tid] = 0;
+
+		splitOut[index] = temp[tid];
+	}
+}
+
+// {
+// 	uint pivot = (listLength >> 7) * (gl_WorkgroupID.x); // todo workgrup start from 1
+// 	uint splitter = splitters[gl_WorkgroupID.x];
+
+// 	for (uint i = gl_SubgroupID; i < listCount; i += gl_NumSubgroups)
+// 	{
+// 		if (i == listCount - 1)
+// 			pivot = (lastListLength >> 7) * gl_WorkgroupID.x;
+
+// 		bool condition = lights.data[pivot + i * listLength + gl_SubgroupInvocationID].mortonCode <= splitter;
+
+// 		int direction;
+// 		if (subgroupAll(condition))
+// 			direction = 1;
+// 		else if (subgroupAll(!condition)) 
+// 			direction = -1;
+// 		else
+// 			direction = 0; // we found right split 
+
+// 		while(direction != 0)
+// 		{
+// 			bool lastCondition = condition;
+
+// 			if (direction > 0) // going up
+// 			{
+// 				uint next = pivot + gl_SubgroupSize;
+// 				if (next == listLength)
+// 					break;
+
+// 				pivot = (next > listLength) ? ((i == listCount -1) ? lastListLength : listLength) - gl_SubgroupSize : next;
+// 				condition = lights.data[pivot + gl_SubgroupInvocationID].mortonCode <= splitter;
+// 			}
+// 			else // going down
+// 			{
+// 				if (pivot == 0)
+// 					break;
+
+// 				pivot = (pivot < gl_SubgroupSize) ? 0 : pivot - gl_SubgroupSize;
+// 				condition = lights.data[pivot + gl_SubgroupInvocationID].mortonCode > splitter;
+// 			}
+
+// 			if (!subgroupAll(condition))
+// 			{
+// 				// last item was in previous run
+// 				if (subgroupAll(!condition))
+// 				{
+// 					condition = lastCondition;
+// 					pivot -= (direction > 0) ? gl_SubgroupSize : -gl_SubgroupSize;
+// 				}
+
+// 				break;
+// 			}
+// 		}
+
+// 		uint index = subgroupBallotBitCount(subgroupBallot(condition));
+// 		if (subgroupElect())
+// 			splitOut[storeOffset + (gl_NumWorkgroups.x << 7) * i + gl_WorkgroupID.x] = pivot + index;
+// 	}
+// }
+
