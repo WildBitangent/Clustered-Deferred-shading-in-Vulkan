@@ -280,7 +280,7 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 
 	// create command pools
 	vk::CommandPoolCreateInfo poolInfo;
-	poolInfo.queueFamilyIndex = context.getQueueFamilyIndices().graphicsFamily.first;
+	poolInfo.queueFamilyIndex = context.getQueueFamilyIndices().generalFamily;
 	poolInfo.flags |= vk::CommandPoolCreateFlagBits::eTransient;
 
 	std::vector<vk::UniqueCommandPool> commandPools;
@@ -382,8 +382,8 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &*cmd;
 
-	context.getGraphicsQueue().submit(submitInfo, nullptr);
-	context.getGraphicsQueue().waitIdle(); // todo mb use fences or semaphores? +1
+	context.getGeneralQueue().submit(submitInfo, nullptr);
+	context.getGeneralQueue().waitIdle(); // todo mb use fences or semaphores? +1
 
 	device.updateDescriptorSets(descriptorWrites, {});
 

@@ -128,12 +128,12 @@ namespace
 
 bool QueueFamilyIndices::isComplete() const
 {
-	return graphicsFamily.first >= 0 && presentFamily.first >= 0 && (computeFamily.first >= 0 || sharedComputeGraphics);
+	return generalFamily >= 0 && computeFamily >= 0;
 }
 
 bool QueueFamilyIndices::isSingleQueue() const 
 {
-	return graphicsFamily.first == presentFamily.first == computeFamily.first;
+	return generalFamily == computeFamily;
 }
 
 QueueFamilyIndices QueueFamilyIndices::findQueueFamilies(vk::PhysicalDevice device, vk::SurfaceKHR surface)
@@ -142,46 +142,35 @@ QueueFamilyIndices QueueFamilyIndices::findQueueFamilies(vk::PhysicalDevice devi
 
 	auto queueFamilies = device.getQueueFamilyProperties();
 
-	for (int i = 0; i < static_cast<int>(queueFamilies.size()) && !indices.isComplete(); i++)
+	// try to find queue for compute, graphics and present - standard says that there should be 1 universal queue on every device
+	auto flag = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute;
+	for (int i = 0; i < static_cast<int>(queueFamilies.size()) && indices.generalFamily < 0; i++) // todo rewrite this
+		if (queueFamilies[i].queueFlags & flag && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
+			indices.generalFamily = i;
+
+	// try to pick async
+	for (int i = 0; i < static_cast<int>(queueFamilies.size()); i++)
 	{
-		int queueCount = 0;
-		if (indices.graphicsFamily.first < 0 && queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
-			indices.graphicsFamily = {i, queueCount++};
-
-		if (indices.computeFamily.first < 0 && queueFamilies[i].queueFlags & vk::QueueFlagBits::eCompute)
-			indices.computeFamily = {i, 0};
-
-		if (indices.presentFamily.first < 0 && queueFamilies[i].queueCount > queueCount && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
-			indices.presentFamily = {i, queueCount};
+		if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eCompute)
+		{
+			const auto lastQueue = indices.computeFamily;
+			indices.computeFamily = i;
+			
+			if (i != indices.generalFamily)
+			{
+				indices.computeQueueIndex = 0;
+				break;
+			}
+				
+			if (queueFamilies[i].queueCount > 1)
+				indices.computeQueueIndex = 1;
+			else if (indices.computeQueueIndex == 1) // try to pick another queue in family, which could be async too
+				indices.computeFamily = lastQueue;
+		}
 	}
 
-	// for (int i = 0; i < static_cast<int>(queueFamilies.size()) && !indices.isComplete(); i++)
-	// {
-	// 	size_t queuesUsed = 0;
-	// 	const auto supportCompute = queueFamilies[i].queueFlags & vk::QueueFlagBits::eCompute;
-	//
-	// 	if (queueFamilies[i].queueCount > 0 && (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics))
-	// 	{
-	// 		const auto enoughSize = queueFamilies[i].queueCount >= 2;
-	//
-	// 		if (supportCompute && enoughSize)
-	// 		{
-	// 			indices.sharedComputeGraphics = true;
-	// 			indices.graphicsFamily = {i, queuesUsed++};
-	// 			indices.computeFamily = {i, queuesUsed++};
-	// 		}
-	// 		
-	// 		// take first graphics queue, but try to find shared compute queue
-	// 		if (indices.graphicsFamily.first < 0)
-	// 			indices.graphicsFamily = {i, queuesUsed++};
-	// 	}
-	//
-	// 	if (indices.computeFamily.first < 0 && supportCompute && indices.graphicsFamily.first != i)
-	// 		indices.computeFamily = {i, queuesUsed++};
-	//
-	// 	if (indices.presentFamily.first < 0 && queueFamilies[i].queueCount > queuesUsed && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
-	// 		indices.presentFamily = {i, queuesUsed};
-	// }
+	if (!indices.isComplete())
+		throw std::runtime_error("Failed to pick appropriate queue families");
 
 	return indices;
 }
@@ -331,29 +320,25 @@ void Context::findQueueFamilyIndices()
 void Context::createLogicalDevice()
 {
 	std::vector<vk::DeviceQueueCreateInfo> queueInfo;
-
 	std::vector<int> queueFamilies;
 	std::vector<std::vector<float>> queuePriorities;
-		
-	std::vector<std::pair<int, int>> items = {mQueueFamilyIndices.graphicsFamily, mQueueFamilyIndices.computeFamily, mQueueFamilyIndices.presentFamily};
 
-	for (int i = 0; i < 4; i++) // I doubt it will span over more queues // todo refactor this
+	if (mQueueFamilyIndices.isSingleQueue())
 	{
-		std::vector<float> priorities;
-		for (const auto& item : items)
-		{
-			if (item.first == i)
-			{
-				if (item.second >= priorities.size())
-					priorities.emplace_back(1.0f);
-			}
-		}
-	
-		if (!priorities.empty())
-		{
-			queueFamilies.emplace_back(i);
-			queuePriorities.emplace_back(std::move(priorities));
-		}
+		queueFamilies.emplace_back(mQueueFamilyIndices.generalFamily);
+
+		if (mQueueFamilyIndices.computeQueueIndex > 0)
+			queuePriorities.emplace_back(std::vector<float>{1.0, 1.0});
+		else
+			queuePriorities.emplace_back(1.0);
+	}
+	else
+	{
+		queueFamilies.emplace_back(mQueueFamilyIndices.generalFamily);
+		queuePriorities.emplace_back(1.0);
+
+		queueFamilies.emplace_back(mQueueFamilyIndices.computeFamily);
+		queuePriorities.emplace_back(1.0);
 	}
 		
 	for (size_t i = 0; i < queueFamilies.size(); i++)
@@ -386,25 +371,21 @@ void Context::createLogicalDevice()
 
 	mDevice = mPhysicalDevice.createDeviceUnique(deviceInfo);
 
-	mGraphicsQueue = mDevice->getQueue(mQueueFamilyIndices.graphicsFamily.first, mQueueFamilyIndices.graphicsFamily.second);
-	mComputeQueue = mDevice->getQueue(mQueueFamilyIndices.computeFamily.first, mQueueFamilyIndices.computeFamily.second);
-	mPresentQueue = mDevice->getQueue(mQueueFamilyIndices.presentFamily.first, mQueueFamilyIndices.presentFamily.second);
-
-	// mComputeQueue = mGraphicsQueue;
-	// mPresentQueue = mGraphicsQueue;
-	//
-	// mQueueFamilyIndices.computeFamily = mQueueFamilyIndices.graphicsFamily;
-	// mQueueFamilyIndices.presentFamily = mQueueFamilyIndices.graphicsFamily;
+	mGeneralQueue = mDevice->getQueue(mQueueFamilyIndices.generalFamily, 0);
+	mComputeQueue = mDevice->getQueue(mQueueFamilyIndices.computeFamily, mQueueFamilyIndices.computeQueueIndex);
 }
 
 void Context::createCommandPools()
 {
 	vk::CommandPoolCreateInfo poolInfo;
-	poolInfo.queueFamilyIndex = mQueueFamilyIndices.graphicsFamily.first;
+	poolInfo.queueFamilyIndex = mQueueFamilyIndices.generalFamily;
 
 	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 	mStaticCommandPool = mDevice->createCommandPoolUnique(poolInfo);
 
 	poolInfo.flags |= vk::CommandPoolCreateFlagBits::eTransient;
 	mDynamicCommandPool = mDevice->createCommandPoolUnique(poolInfo);
+	
+	poolInfo.queueFamilyIndex = mQueueFamilyIndices.computeFamily;
+	mComputeCommandPool = mDevice->createCommandPoolUnique(poolInfo);
 }

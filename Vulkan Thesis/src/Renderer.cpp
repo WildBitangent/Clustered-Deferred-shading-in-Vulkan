@@ -18,7 +18,7 @@ constexpr auto WIDTH = 1024;
 constexpr auto HEIGHT = 726;
 
 constexpr auto MAX_LIGHTS_PER_TILE = 1024;
-constexpr auto MAX_POINTLIGHTS = 50000;
+constexpr auto MAX_POINTLIGHTS = 500000;
 
 struct CameraUBO
 {
@@ -86,6 +86,7 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 void Renderer::requestDraw(float deltatime)
 {
 	updateUniformBuffers(/*deltatime*/);
+	submitLightSortingCmds(0);
 	drawFrame();
 }
 
@@ -164,18 +165,7 @@ void Renderer::createSwapChain()
 	swapchainInfo.imageExtent = extent;
 	swapchainInfo.imageArrayLayers = 1;
 	swapchainInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
-
-	QueueFamilyIndices indices = mContext.getQueueFamilyIndices();
-	uint32_t queueFamilyIndices[] = { static_cast<uint32_t>(indices.graphicsFamily.first), static_cast<uint32_t>(indices.presentFamily.first) };
-
-	if (indices.graphicsFamily.first != indices.presentFamily.first)
-	{
-		swapchainInfo.imageSharingMode = vk::SharingMode::eConcurrent;
-		swapchainInfo.queueFamilyIndexCount = 2;
-		swapchainInfo.pQueueFamilyIndices = queueFamilyIndices;
-	}
-	else
-		swapchainInfo.imageSharingMode = vk::SharingMode::eExclusive;
+	swapchainInfo.imageSharingMode = vk::SharingMode::eExclusive; // present is inside graphics
 
 	auto oldSwapchain = std::move(mSwapchain); //which will be destroyed when out of scope
 
@@ -1456,6 +1446,7 @@ void Renderer::createSyncPrimitives()
 	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
 
 	mLightCullingFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
+	mLightSortingFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
 	mGBufferFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
 
 	for (size_t i = 0; i < mSwapchainImages.size(); i++)
@@ -1586,13 +1577,18 @@ void Renderer::createComputeCommandBuffer()
 		allocInfo.commandPool = mContext.getDynamicCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
-
 		mPrimaryLightCullingCommandBuffer = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
 
 		allocInfo.level = vk::CommandBufferLevel::eSecondary;
 		allocInfo.commandPool = mContext.getStaticCommandPool();
 		allocInfo.commandBufferCount = 2;
 		mSecondaryLightCullingCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+
+		// light sorting buffers
+		allocInfo.commandPool = mContext.getComputeCommandPool();
+		allocInfo.level = vk::CommandBufferLevel::ePrimary;
+		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
+		mLightSortingCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
 	}
 
 	// Record command buffer
@@ -1746,7 +1742,7 @@ void Renderer::drawFrame()
 		submitInfo.pSignalSemaphores = &*mGBufferFinishedSemaphore;
 
 		// submitInfos.emplace_back(submitInfo);
-		mContext.getGraphicsQueue().submit(submitInfo, nullptr);
+		mContext.getGeneralQueue().submit(submitInfo, nullptr);
 	}
 
 	if (BaseApp::getInstance().getUI().getDebugIndex() == DebugStates::disabled)
@@ -1846,7 +1842,7 @@ void Renderer::drawFrame()
 		submitInfos.emplace_back(submitInfo);
 	}
 
-	mContext.getGraphicsQueue().submit(submitInfos, *mFences[mCurrentFrame]);
+	mContext.getGeneralQueue().submit(submitInfos, *mFences[mCurrentFrame]);
 
 	// 3. Submitting the result back to the swap chain to show it on screen
 	{
@@ -1857,7 +1853,7 @@ void Renderer::drawFrame()
 		presentInfo.pSwapchains = &*mSwapchain;
 		presentInfo.pImageIndices = &imageIndex;
 
-		auto presentResult = mContext.getPresentQueue().presentKHR(presentInfo);
+		auto presentResult = mContext.getGeneralQueue().presentKHR(presentInfo);
 
 		if (presentResult == vk::Result::eErrorOutOfDateKHR || presentResult == vk::Result::eSuboptimalKHR)
 			recreateSwapChain();
@@ -1875,6 +1871,63 @@ void Renderer::submitLightCullingCmds(size_t imageIndex)
 
 	std::array<vk::DescriptorSet, 2> descriptorSets{ 
 mResource.descriptorSet.get("camera"),
+mResource.descriptorSet.get(mLightBufferSwapUsed)
+	};
+	// record 
+	cmd.begin(vk::CommandBufferBeginInfo{});
+	cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[0]);
+
+	// light culling
+	{
+		uint32_t data = 0;
+		auto buffer = (mLightBufferSwapUsed == "lightculling_01") ? mLightsOutOffset : mLightsIndirectionOffset; // TODO rewrite this shit
+	
+		vk::BufferMemoryBarrier before;
+		before.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+		before.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+		before.size = 4;
+		before.offset = buffer;
+		before.buffer = *mLightsBuffers.handle;
+	
+		vk::BufferMemoryBarrier after = before;
+		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		after.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead;
+	
+		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, before, nullptr);
+		cmd.updateBuffer(*mLightsBuffers.handle, buffer, 4, &data);
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlagBits::eByRegion, nullptr, after, nullptr);
+		
+		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 0, descriptorSets, nullptr);
+		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 0, 4, &maxLevel);
+		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 4, levelParam.size() * 8, levelParam.data());
+		cmd.dispatchIndirect(*mClusteredBuffer.handle, mUniqueClustersOffset + 4);
+		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+	}
+
+	cmd.end();
+	
+	std::vector<vk::PipelineStageFlags> waitStages = {vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer};
+	std::vector<vk::Semaphore> waitSemaphores = {*mGBufferFinishedSemaphore, *mLightSortingFinishedSemaphore};
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.waitSemaphoreCount = 2;
+	submitInfo.pWaitSemaphores = waitSemaphores.data();
+	submitInfo.pWaitDstStageMask = waitStages.data();
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &cmd;
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &*mLightCullingFinishedSemaphore;
+
+	mContext.getGeneralQueue().submit(submitInfo, nullptr);
+}
+
+void Renderer::submitLightSortingCmds(size_t imageIndex)
+{
+	auto& cmd = *mLightSortingCommandBuffers[imageIndex];
+
+	std::array<vk::DescriptorSet, 2> descriptorSets{ 
+mResource.descriptorSet.get("camera"),
 mResource.descriptorSet.get("lightculling_01")
 	};
 
@@ -1883,24 +1936,19 @@ mResource.descriptorSet.get("lightculling_01")
 	barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 
 	std::array<uint32_t, 30> pcLeaves;
-	
-	std::vector<std::pair<uint32_t, uint32_t>> levelParam;
 	levelParam.reserve(6);
+	levelParam.clear();
 
-	uint32_t maxLevel;
 	mLightBufferSwapUsed = "lightculling_01";
 
-	// record 
 	cmd.begin(vk::CommandBufferBeginInfo{});
-	cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[0]);
-	
+
 	// light sorting
 	{
 		size_t lightWindowsCount = (1023 + mLightsCount) >> 10;
 
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 0, descriptorSets, nullptr);	
 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_bitonic"));
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
 		cmd.dispatch(lightWindowsCount, 1, 1);
 
 		// splitters
@@ -1930,35 +1978,6 @@ mResource.descriptorSet.get("lightculling_01")
 				
 				mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
 			}
-
-			// if (mLightBufferSwapUsed == "lightculling_10")
-			// {
-			// 	vk::DeviceSize size = mLightsCount * 8;
-			//
-			// 	vk::BufferCopy copy;
-			// 	copy.srcOffset = mLightsOutOffset;
-			// 	copy.dstOffset = mLightsIndirectionOffset;
-			// 	copy.size = size;
-			//
-			// 	vk::BufferMemoryBarrier barrier;
-			// 	barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-			// 	barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-			// 	barrier.size = size;
-			// 	barrier.offset = mLightsOutOffset;
-			// 	barrier.buffer = *mLightsBuffers.handle;
-			//
-			// 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
-			// 	cmd.copyBuffer(*mLightsBuffers.handle, *mLightsBuffers.handle, copy);
-			//
-			// 	barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-			// 	barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-			// 	barrier.offset = mLightsIndirectionOffset;
-			//
-			// 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
-			// 	
-			//
-			// 	// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-			// }
 		}		
 		
 		mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
@@ -2008,52 +2027,13 @@ mResource.descriptorSet.get("lightculling_01")
 		}
 	}
 
-	// light culling
-	{
-		uint32_t data = 0;
-		auto buffer = (mLightBufferSwapUsed == "lightculling_01") ? mLightsOutOffset : mLightsIndirectionOffset; // TODO rewrite this shit
-	
-		vk::BufferMemoryBarrier before;
-		before.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-		before.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-		before.size = 4;
-		before.offset = buffer;
-		before.buffer = *mLightsBuffers.handle;
-	
-		vk::BufferMemoryBarrier after = before;
-		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-		after.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead;
-	
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, before, nullptr);
-		cmd.updateBuffer(*mLightsBuffers.handle, buffer, 4, &data);
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlagBits::eByRegion, nullptr, after, nullptr);
-		
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
-		// cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
-		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 0, 4, &maxLevel);
-		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 4, levelParam.size() * 8, levelParam.data());
-		cmd.dispatchIndirect(*mClusteredBuffer.handle, mUniqueClustersOffset + 4);
-		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-	}
-
-	// cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[1]);
 	cmd.end();
 	
-	vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eComputeShader;
-
 	vk::SubmitInfo submitInfo;
-	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &*mGBufferFinishedSemaphore;
-	submitInfo.pWaitDstStageMask = &waitStages;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &cmd;
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &*mLightCullingFinishedSemaphore;
+	submitInfo.pSignalSemaphores = &*mLightSortingFinishedSemaphore;
 
-	mContext.getComputeQueue().submit(submitInfo, nullptr); // TODO compute queue in graphics queue
-}
-
-void Renderer::submitLightSortingCmds(size_t imageIndex)
-{
-	
+	mContext.getComputeQueue().submit(submitInfo, nullptr);
 }

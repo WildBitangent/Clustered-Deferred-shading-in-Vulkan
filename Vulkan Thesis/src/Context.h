@@ -7,11 +7,9 @@ struct GLFWwindow;
 
 struct QueueFamilyIndices
 {
-	std::pair<int, int> graphicsFamily = {-1, -1};
-	std::pair<int, int> presentFamily = {-1, -1};
-	std::pair<int, int> computeFamily = {-1, -1};
-
-	bool sharedComputeGraphics = false;
+	int generalFamily = -1;
+	int computeFamily = -1;
+	int computeQueueIndex = 0;
 
 	bool isComplete() const;
 	bool isSingleQueue() const;
@@ -50,14 +48,9 @@ public:
 		return *mDevice;
 	}
 
-	vk::Queue getGraphicsQueue() const
+	vk::Queue getGeneralQueue() const
 	{
-		return mGraphicsQueue;
-	}
-
-	vk::Queue getPresentQueue() const
-	{
-		return mPresentQueue;
+		return mGeneralQueue;
 	}
 
 	vk::Queue getComputeQueue() const
@@ -78,6 +71,11 @@ public:
 	vk::CommandPool getDynamicCommandPool() const
 	{
 		return *mDynamicCommandPool;
+	}
+
+	vk::CommandPool getComputeCommandPool() const
+	{
+		return *mComputeCommandPool;
 	}
 
 private:
@@ -102,12 +100,12 @@ private:
 
 	QueueFamilyIndices		mQueueFamilyIndices;
 	vk::PhysicalDevice		mPhysicalDevice;
-	vk::Queue				mGraphicsQueue;
-	vk::Queue				mPresentQueue;
+	vk::Queue				mGeneralQueue;
 	vk::Queue				mComputeQueue;
 
 	vk::UniqueCommandPool	mStaticCommandPool;
 	vk::UniqueCommandPool	mDynamicCommandPool;
+	vk::UniqueCommandPool	mComputeCommandPool;
 
 	//vk::PhysicalDeviceProperties	mPhyisicalDeviceProperties;
 };

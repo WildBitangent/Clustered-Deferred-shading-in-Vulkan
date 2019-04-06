@@ -31,7 +31,7 @@ void BaseApp::run()
 
 		glfwPollEvents();
 
-		if (deltaTime > 1.0 / 60.0)
+		// if (deltaTime > 1.0 / 60.0)
 		{
 			tick(deltaTime);
 			startTime = current;
@@ -40,9 +40,9 @@ void BaseApp::run()
 			mRenderer.updateLights(mLights);
 			// mRenderer.cleanUp();
 		}
-		else if (mUI.mContext.vSync)
-			continue;
-		
+		// else if (mUI.mContext.vSync) // TODO bug blinking
+		// 	continue;
+		//
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 		
@@ -83,11 +83,11 @@ BaseApp::BaseApp()
 	, mRenderer(mWindow, *mThreadPool)
 	, mUI(mWindow, mRenderer)
 {
-	mLights.reserve(50'000); // todo refactor for max tile lights
-	mLightsDirections.reserve(50'000);
+	mLights.reserve(500'000); // todo refactor for max tile lights
+	mLightsDirections.reserve(500'000);
 
 	// create lights
-	for (size_t i = 0; i < 50'000; i++)
+	for (size_t i = 0; i < 500'000; i++)
 	{
 		mLights.emplace_back(PointLight{
 			{ 11.0f - i * 3, 1.5, -0.4 },

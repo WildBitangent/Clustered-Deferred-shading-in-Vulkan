@@ -465,8 +465,8 @@ void Utility::endSingleTimeCommands(vk::CommandBuffer buffer)
 	vk::SubmitInfo submitInfo;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &buffer;
-	mContext.getGraphicsQueue().submit(submitInfo, nullptr);
-	mContext.getGraphicsQueue().waitIdle();
+	mContext.getGeneralQueue().submit(submitInfo, nullptr);
+	mContext.getGeneralQueue().waitIdle();
 
 	// free the temperorary command buffer
 	mContext.getDevice().freeCommandBuffers(mContext.getStaticCommandPool(), buffer);

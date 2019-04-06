@@ -58,6 +58,7 @@ private:
 	void drawFrame();
 
 	void submitLightCullingCmds(size_t imageIndex);
+
 	void submitLightSortingCmds(size_t imageIndex);
 
 private:
@@ -82,6 +83,7 @@ private:
 	std::vector<vk::UniqueCommandBuffer> mCompositionCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mPrimaryLightCullingCommandBuffer;
 	std::vector<vk::UniqueCommandBuffer> mSecondaryLightCullingCommandBuffers;
+	std::vector<vk::UniqueCommandBuffer> mLightSortingCommandBuffers;
 	vk::UniqueCommandBuffer mGBufferCommandBuffer;
 	std::vector<vk::UniqueCommandBuffer> mPrimaryDebugCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffers;
@@ -90,6 +92,7 @@ private:
 	std::vector<vk::UniqueSemaphore> mImageAvailableSemaphore; // todo alloc
 	vk::UniqueSemaphore mGBufferFinishedSemaphore;
 	vk::UniqueSemaphore mLightCullingFinishedSemaphore;
+	vk::UniqueSemaphore mLightSortingFinishedSemaphore;
 	std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphore; // todo
 
 	std::vector<vk::UniqueFence> mFences;
@@ -138,6 +141,10 @@ private:
 	size_t mCurrentTileSize = 32;
 	size_t mSubGroupSize;
 	std::string mLightBufferSwapUsed = "lightculling_01";
+
+	// todo rewrite this
+	uint32_t maxLevel;
+	std::vector<std::pair<uint32_t, uint32_t>> levelParam;
 	
 	glm::uvec2 mTileCount;
 
