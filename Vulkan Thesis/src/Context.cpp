@@ -255,7 +255,7 @@ void Context::setupDebugCallback()
 	createInfo.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
 	createInfo.pfnUserCallback = debugCallback;
 
-	static auto dldi = vk::DispatchLoaderDynamic(*mInstance); //TODO ain't nobody got time for that
+	static auto dldi = vk::DispatchLoaderDynamic(*mInstance, reinterpret_cast<PFN_vkGetInstanceProcAddr>(mInstance->getProcAddr("vkGetInstanceProcAddr"))); //TODO ain't nobody got time for that
 
 	mMessenger = mInstance->createDebugUtilsMessengerEXTUnique(createInfo, nullptr, dldi);
 #endif

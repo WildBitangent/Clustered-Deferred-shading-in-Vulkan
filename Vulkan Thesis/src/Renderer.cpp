@@ -18,7 +18,7 @@ constexpr auto TILE_SIZE = 32;
 constexpr auto TILE_COUNT_X = (WIDTH - 1) / TILE_SIZE + 1;
 constexpr auto TILE_COUNT_Y = (HEIGHT - 1) / TILE_SIZE + 1;
 constexpr auto MAX_LIGHTS_PER_TILE = 1024;
-constexpr auto MAX_POINTLIGHTS = 50000;
+constexpr auto MAX_POINTLIGHTS = 500'000;
 
 struct CameraUBO
 {
@@ -262,7 +262,7 @@ void Renderer::createRenderPasses()
 			description.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
 			description.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
 			description.initialLayout = vk::ImageLayout::eUndefined;
-			description.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+			description.finalLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 
 			vk::AttachmentReference reference;
 			reference.attachment = 3;

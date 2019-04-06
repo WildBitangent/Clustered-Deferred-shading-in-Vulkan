@@ -82,7 +82,7 @@ void UI::update()
 
 	Begin("Tile settings");
 	{
-		constexpr int maxLights = 50'000; // todo refarctor this
+		constexpr int maxLights = 500'000; // todo refarctor this
 		DragInt("Number of lights", &mContext.lightsCount, 10, 1, maxLights);
 
 		// v_max doesn't work properly, make sure it doesn't exceed

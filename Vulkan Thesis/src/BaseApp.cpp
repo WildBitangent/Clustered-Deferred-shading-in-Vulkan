@@ -74,11 +74,11 @@ BaseApp::BaseApp()
 	: mRenderer(mWindow)
 	, mUI(mWindow, mRenderer)
 {
-	mLights.reserve(50'000); // todo refactor for max tile lights
-	mLightsDirections.reserve(50'000);
+	mLights.reserve(500'000); // todo refactor for max tile lights
+	mLightsDirections.reserve(500'000);
 
 	// create lights
-	for (size_t i = 0; i < 50'000; i++)
+	for (size_t i = 0; i < 500'000; i++)
 	{
 		mLights.emplace_back(PointLight{
 			{ 11.0f - i * 3, 1.5, -0.4 },
