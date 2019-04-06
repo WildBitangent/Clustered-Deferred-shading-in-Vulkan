@@ -241,8 +241,6 @@ void testLastLevelCollisions(ViewFrustum frustum, uint offset)
 	}
 }
 
-#define CORRECT_COLLISION(count) \
-	
 
 layout(local_size_x = 512) in;
 void main()
@@ -364,21 +362,7 @@ void main()
 
 // 		for (uint x = 0; x < lightCount_screenSize.x; x++)
 // 		{
-// 			vec3 position = (camera.view * vec4(lightsIn[x].position, 1.0)).xyz;
-// 			// vec3 position = lightsIn[x].position;
-			
-// 			// if (collideSphere(frustum, position, lightsIn[x].radius))
-// 			// {
-// 			// 	lightIndices[lightCount++] = x;
-// 			// }
-
-// 			AABB aabb;
-// 			aabb.min = position - lightsIn[x].radius;
-// 			aabb.max = position + lightsIn[x].radius;
-// 			// aabb.min = (camera.view * vec4(lightsIn[x].position - lightsIn[x].radius, 1.0)).xyz;
-// 			// aabb.max = (camera.view * vec4(lightsIn[x].position + lightsIn[x].radius, 1.0)).xyz;
-
-// 			if (collideAABB(frustum, aabb))
+// 			if (collideSphere(frustum, lightsIn[x].position, lightsIn[x].radius))
 // 				lightIndices[lightCount++] = x;				
 // 		}
 
@@ -394,7 +378,7 @@ void main()
 
 // 		if (lightCount > 0)
 // 		{
-// 			uint index = atomicAdd(lightsOut.count, lightCount + 1);
+// 			uint index = atomicAdd(lightsOut.indirectCount, lightCount + 1);
 // 			pool.data[addressTranslate(key)] = index;
 // 			lightsOut.lights[index++] = lightCount;
 			

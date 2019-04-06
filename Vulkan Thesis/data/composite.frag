@@ -30,12 +30,6 @@ layout(std430, set = 1, binding = 0) buffer readonly PointLights
 	Light lights[];
 } pointLights;
 
-layout(std430, set = 1, binding = 0) buffer Asd
-{
-	uint a[4];
-	uint data[];
-};
-
 layout(std430, set = 1, binding = 1) buffer readonly LightsOut
 {
 	uint count;
@@ -121,19 +115,6 @@ void main()
 	vec3 fragcolor = albedo.rgb * ambient;
 
 	uint indirectCount = lightsOut.data[index];
-	// if (indirectCount > 5)
-	// 	data[atomicAdd(a[3], 1)] = indirectCount;
-	// atomicMax(a[3], lightsOut.data[index + 2]);
-	// if (gl_FragCoord.y < 100)
-	// 	data[uint(gl_FragCoord.x) + uint(gl_FragCoord.y) * pointLights.lightCount_screenSize.y] = index;
-	// if (indirectCount > 1)
-	// {
-	// 	fragcolor = vec3(248, 24, 148) / 256;
-	// 	uint index = atomicAdd(a[3], 3);
-	// 	data[index] = uint(gl_FragCoord.x);
-	// 	data[index + 1] = uint(gl_FragCoord.y);
-	// 	data[index + 2] = indirectCount;
-	// }
 
 	for (uint ii = 0; ii < indirectCount; ii++)
 	{
@@ -172,17 +153,12 @@ void main()
 	// 	uint lightIndex = lightsOut.data[index + i + 1];
 
 	// 	Light light = pointLights.lights[lightIndex];
-	// 	light.position = (camera.view * vec4(light.position, 1.0)).xyz;
-	// 	// vec3 camPos = vec3(camera.view[0][3], camera.view[1][3], camera.view[2][3]);
-	// 	// vec3 camPos = (camera.view * vec4(camera.position, 1.0)).xyz;
 
 	// 	vec3 L = light.position - fragPos;
 	// 	vec3 V = normalize(-fragPos);
 	// 	vec3 N = normalize(normal);
 
 	// 	// Attenuation
-	// 	// float atten = light.radius / (pow(length(L), 2.0) + 1.0);
-	// 	// float atten = max(0.f, 1.f - (length(L) / light.radius));
 	// 	float atten = clamp(1.0 - pow(length(L), 2.0) / pow(light.radius, 2.0), 0.0, 1.0);
 	// 	L = normalize(L);
 
