@@ -58,6 +58,11 @@ public:
 		return mComputeQueue;
 	}
 
+	GLFWwindow* getWindow() const
+	{
+		return mWindow;
+	}
+
 	vk::SurfaceKHR getWindowSurface() const
 	{
 		return *mSurface;

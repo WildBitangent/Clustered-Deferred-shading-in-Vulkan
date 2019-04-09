@@ -57,7 +57,7 @@ void UI::update()
 
 	using namespace ImGui;
 
-	if (Begin("Debug Settings"))
+	if (Begin("Settings"))
 	{
 		Text("%.3f ms/frame (%.1f FPS)", 1000.0f / GetIO().Framerate, GetIO().Framerate);
 
@@ -78,20 +78,29 @@ void UI::update()
 			}
 			TreePop();
 		}
-	}
-	End();
 
-	if (Begin("Tile settings"))
-	{
-		constexpr int maxLights = 500'000; // todo refarctor this
-		DragInt("Number of lights", &mContext.lightsCount, 10, 1, maxLights);
+		if (TreeNode("Tile settings"))
+		{
+			constexpr int maxLights = 500'000; // todo refarctor this
+			DragInt("Number of lights", &mContext.lightsCount, 10, 1, maxLights);
 
-		// v_max doesn't work properly, make sure it doesn't exceed
-		if (mContext.lightsCount > maxLights) mContext.lightsCount = maxLights;
+			// v_max doesn't work properly, make sure it doesn't exceed
+			if (mContext.lightsCount > maxLights) mContext.lightsCount = maxLights;
 
-		const char* options[] = { "8x8", "16x16", "32x32", "64x64" };
-		if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
-			mContext.shaderReloadDirtyBit = true;
+			const char* options[] = { "8x8", "16x16", "32x32", "64x64" };
+			if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
+				mContext.shaderReloadDirtyBit = true;
+
+			TreePop();
+		}
+
+		if (TreeNode("Light extents"))
+		{
+			DragFloat3("Min", reinterpret_cast<float*>(&mContext.lightBoundMin), 0.25);
+			DragFloat3("Max", reinterpret_cast<float*>(&mContext.lightBoundMax), 0.25);
+
+			TreePop();
+		}
 	}
 	End();
 }

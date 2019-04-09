@@ -31,7 +31,7 @@ void BaseApp::run()
 
 		glfwPollEvents();
 
-		// if (deltaTime > 1.0 / 60.0)
+		if (deltaTime > 1.0 / 60.0)
 		{
 			tick(deltaTime);
 			startTime = current;
@@ -40,9 +40,9 @@ void BaseApp::run()
 			mRenderer.updateLights(mLights);
 			// mRenderer.cleanUp();
 		}
-		// else if (mUI.mContext.vSync) // TODO bug blinking
-		// 	continue;
-		//
+		else if (mUI.mContext.vSync) // TODO bug blinking
+			continue;
+
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 		
@@ -90,7 +90,8 @@ BaseApp::BaseApp()
 	for (size_t i = 0; i < 500'000; i++)
 	{
 		mLights.emplace_back(PointLight{
-			{ 11.0f - i * 3, 1.5, -0.4 },
+			{ 6.5f - i * 3, 1.5, -4.0f },
+			//{ 11.0f - i * 3, 1.5, -0.4 },
 			// { 11.0f, 1.5, -0.4 },
 			2.0f,
 			{ 1.0f, 1.0f, 1.0f/* - i * 0.2f*/ },
@@ -110,7 +111,13 @@ GLFWwindow* BaseApp::createWindow()
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // no OpenGL context
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	auto window = glfwCreateWindow(1024, 726, "Vulkan test", nullptr, nullptr);
+	// const auto mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+	// glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+	// glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+	// glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+	// glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+	auto window = glfwCreateWindow(1280, 720, "Clustered deferred shading in Vulkan", /*glfwGetPrimaryMonitor()*/nullptr, nullptr);
+	// auto window = glfwCreateWindow(mode->width, mode->height, "Clustered deferred shading in Vulkan", glfwGetPrimaryMonitor(), nullptr);
 
 	glfwSetWindowUserPointer(window, this);
 
@@ -150,12 +157,19 @@ void BaseApp::tick(float dt)
 	{
 		for (size_t i = offset; i < offset + size; i++)
 		{
-			if (glm::length(mLights[i].position) > 35)
+			const auto& p = mLights[i].position;
+			const auto& mi = mUI.mContext.lightBoundMin;
+			const auto& ma = mUI.mContext.lightBoundMax;
+			if (p.x < mi.x || p.x > ma.x ||
+				p.y < mi.y || p.y > ma.y ||
+				p.z < mi.z || p.z > ma.z)
 			{
+				auto size = abs(mUI.mContext.lightBoundMin - mUI.mContext.lightBoundMax);
+
 				mLightsDirections[i] = randVec3();
 				mLights[i].intensity = glm::abs(randVec3());
-				mLights[i].position = randVec3() * glm::vec3(20, 0, 20);
-				mSpeeds[i] = (1 + (rand() % 100)) / 200.0f;
+				mLights[i].position = mUI.mContext.lightBoundMin + abs(randVec3()) * size;
+				mSpeeds[i] = (1 + (rand() % 100)) / 400.0f;
 			}
 
 			mLights[i].position += mLightsDirections[i] * mSpeeds[i];
@@ -184,7 +198,10 @@ void BaseApp::tick(float dt)
 
 	if (mRMBDown)
 	{
-		auto cursorDelta = (mCursorPos - mPrevCursorPos) / glm::vec2(glm::min(1024, 726) * 2.0f);
+		int width, height;
+	    glfwGetFramebufferSize(mWindow, &width, &height);
+
+		auto cursorDelta = (mCursorPos - mPrevCursorPos) / glm::vec2(glm::min(width, height) * 2.0f);
 	
 		if (!util::isNearlyEqual(cursorDelta.x, 0, 1e-5))
 			mCamera.rotation = glm::angleAxis(mCamera.rotationSpeed * -cursorDelta.x, glm::vec3(0.0f, 1.0f, 0.0f)) * mCamera.rotation;

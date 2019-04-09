@@ -12,7 +12,7 @@ struct Camera
 	//glm::quat rotation = { 0.68f, 0.0f, 0.72f, 0.0f }; 
 	glm::quat rotation = { 0.0f, 0.0f, 0.0f, 0.0f }; 
 	float rotationSpeed = glm::pi<float>();
-	float moveSpeed = 10.f;
+	float moveSpeed = 7.f;
 
 	glm::mat4 getViewMatrix() const
 	{

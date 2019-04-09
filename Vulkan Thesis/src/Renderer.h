@@ -61,6 +61,8 @@ private:
 
 	void submitLightSortingCmds(size_t imageIndex);
 
+	void setTileCount();
+
 private:
 	Context mContext;
 	Utility mUtility;

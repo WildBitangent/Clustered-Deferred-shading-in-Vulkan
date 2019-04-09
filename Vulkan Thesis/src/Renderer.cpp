@@ -13,10 +13,6 @@
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
-// TODO refactor this
-constexpr auto WIDTH = 1024;
-constexpr auto HEIGHT = 726;
-
 constexpr auto MAX_LIGHTS_PER_TILE = 1024;
 constexpr auto MAX_POINTLIGHTS = 500000;
 
@@ -48,7 +44,6 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	: mContext(window)
 	, mUtility(mContext)
 	, mResource(mContext.getDevice())
-	, mTileCount((WIDTH - 1) / mCurrentTileSize + 1, (HEIGHT - 1) / mCurrentTileSize + 1)
 {
 	vk::PhysicalDeviceSubgroupProperties subgroupProperties;
 	vk::PhysicalDeviceProperties2 properties2;
@@ -57,6 +52,8 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	mContext.getPhysicalDevice().getProperties2(&properties2);
 
 	mSubGroupSize = subgroupProperties.subgroupSize;
+
+	setTileCount();
 
 	createSwapChain();
 	createSwapChainImageViews();
@@ -70,8 +67,8 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createClusteredBuffers();
 	createLights();
 	createDescriptorPool();
-	mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
-	// mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
+	// mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
+	mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
 	createDescriptorSets();
 	createGraphicsCommandBuffers();
 	createComputeCommandBuffer();
@@ -119,7 +116,7 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 void Renderer::reloadShaders(size_t size)
 {
 	mCurrentTileSize = size;
-	mTileCount = { (WIDTH - 1) / size + 1, (HEIGHT - 1) / size + 1 };
+	setTileCount();
 
 	vkDeviceWaitIdle(mContext.getDevice());
 
@@ -131,13 +128,19 @@ void Renderer::reloadShaders(size_t size)
 
 void Renderer::recreateSwapChain()
 {
+    for (int width = 0, height = 0; width == 0 || height == 0; ) 
+	{
+        glfwGetFramebufferSize(mContext.getWindow(), &width, &height);
+        glfwWaitEvents();
+    }
+
 	vkDeviceWaitIdle(mContext.getDevice());
 
 	createSwapChain();
 	createSwapChainImageViews();
+	createGBuffers();
 	createRenderPasses();
 	createGraphicsPipelines();
-	createGBuffers();
 	createGraphicsCommandBuffers();
 }
 
@@ -1686,7 +1689,7 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	auto memorySize = sizeof(PointLight) * mLightsCount + sizeof(glm::vec4);
 	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize + 8192));
 
-	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {WIDTH, HEIGHT} };
+	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {mSwapchainExtent.width, mSwapchainExtent.height} };
 	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
 
 	std::uniform_int_distribution<uint32_t> distribution(0, mLightsCount - 1);
@@ -1710,17 +1713,18 @@ void Renderer::drawFrame()
 	// Acquire an image from the swap chain
 	uint32_t imageIndex;
 	{
-		auto result = mContext.getDevice().acquireNextImageKHR(*mSwapchain, std::numeric_limits<uint64_t>::max(), *mImageAvailableSemaphore[mCurrentFrame], nullptr);
 
-		imageIndex = result.value;
-
-		if (result.result == vk::Result::eErrorOutOfDateKHR)
+		try
 		{
-			// when swap chain needs recreation
+			auto result = mContext.getDevice().acquireNextImageKHR(*mSwapchain, std::numeric_limits<uint64_t>::max(), *mImageAvailableSemaphore[mCurrentFrame], nullptr);
+			imageIndex = result.value;
+		}
+		catch(const vk::OutOfDateKHRError& e)
+		{
 			recreateSwapChain();
 			return;
 		}
-		if (result.result != vk::Result::eSuccess && result.result != vk::Result::eSuboptimalKHR)
+		catch(...)
 		{
 			throw std::runtime_error("Failed to acquire swap chain image!");
 		}
@@ -1853,12 +1857,20 @@ void Renderer::drawFrame()
 		presentInfo.pSwapchains = &*mSwapchain;
 		presentInfo.pImageIndices = &imageIndex;
 
-		auto presentResult = mContext.getGeneralQueue().presentKHR(presentInfo);
-
-		if (presentResult == vk::Result::eErrorOutOfDateKHR || presentResult == vk::Result::eSuboptimalKHR)
+		try
+		{
+			mContext.getGeneralQueue().presentKHR(presentInfo);
+		}
+		catch(const vk::OutOfDateKHRError& e)
+		{
 			recreateSwapChain();
-		else if (presentResult != vk::Result::eSuccess)
-			throw std::runtime_error("Failed to present swap chain image");
+			return;
+		}
+		catch(...)
+		{
+			throw std::runtime_error("Failed to present swap chain image!");
+		}
+
 	}
 
 	mContext.getDevice().waitIdle();
@@ -2036,4 +2048,11 @@ mResource.descriptorSet.get("lightculling_01")
 	submitInfo.pSignalSemaphores = &*mLightSortingFinishedSemaphore;
 
 	mContext.getComputeQueue().submit(submitInfo, nullptr);
+}
+
+void Renderer::setTileCount()
+{
+	int width, height;
+    glfwGetFramebufferSize(mContext.getWindow(), &width, &height);
+	mTileCount = {(width - 1) / mCurrentTileSize + 1, (height - 1) / mCurrentTileSize + 1};
 }

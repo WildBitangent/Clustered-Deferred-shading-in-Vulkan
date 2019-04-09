@@ -110,8 +110,8 @@ void main()
 	uint address = addressTranslate(packKey(key));
 	uint index = pool.data[address];
 	// Ambient part
-	// #define ambient 0.03
-	#define ambient 0.2
+	#define ambient 0.03
+	// #define ambient 0.2
 	vec3 fragcolor = albedo.rgb * ambient;
 
 	uint indirectCount = lightsOut.data[index];

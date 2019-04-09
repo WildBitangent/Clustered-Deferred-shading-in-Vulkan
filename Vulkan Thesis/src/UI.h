@@ -40,6 +40,8 @@ public:
 		bool debugUniformDirtyBit = false;
 		bool shaderReloadDirtyBit = false;
 
+		glm::vec3 lightBoundMin = {-31, -5.5, -37.5};
+		glm::vec3 lightBoundMax = {18.5, 15.5, 16};
 		int lightsCount = 32768;
 		int tileSize = 2;
 		bool lightsAnimation = false;
