@@ -87,7 +87,7 @@ void UI::update()
 			// v_max doesn't work properly, make sure it doesn't exceed
 			if (mContext.lightsCount > maxLights) mContext.lightsCount = maxLights;
 
-			const char* options[] = { "8x8", "16x16", "32x32", "64x64" };
+			const char* options[] = { "16x16", "32x32", "64x64" };
 			if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
 				mContext.shaderReloadDirtyBit = true;
 
@@ -110,7 +110,7 @@ void UI::resize()
 	createPipeline();
 }
 
-void UI::copyDrawData()
+void UI::copyDrawData(vk::CommandBuffer& cmd)
 {
 	auto drawData = ImGui::GetDrawData();
 
@@ -139,8 +139,6 @@ void UI::copyDrawData()
 
 void UI::recordCommandBuffer()
 {
-	copyDrawData();
-
 	auto& cmd = *mCmdBuffers[mCommandBufferInUse];
 	auto& context = BaseApp::getInstance().getRenderer().mContext;
 	const auto drawData = ImGui::GetDrawData();
@@ -163,6 +161,8 @@ void UI::recordCommandBuffer()
 	translate[1] = -1.0f - drawData->DisplayPos.y * scale[1];
 
 	cmd.begin(beginInfo);
+	copyDrawData(cmd);
+
 	cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(float) * 2, scale);
 	cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, sizeof(float) * 2, sizeof(float) * 2, translate);
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, BaseApp::getInstance().getRenderer().mResource.pipeline.get("UI"));

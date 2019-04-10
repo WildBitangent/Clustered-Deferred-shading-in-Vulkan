@@ -43,7 +43,7 @@ public:
 		glm::vec3 lightBoundMin = {-31, -5.5, -37.5};
 		glm::vec3 lightBoundMax = {18.5, 15.5, 16};
 		int lightsCount = 32768;
-		int tileSize = 2;
+		int tileSize = 1;
 		bool lightsAnimation = false;
 		bool vSync = true;
 	} mContext;
@@ -57,7 +57,7 @@ public:
 
 	void update();
 	void resize();
-	void copyDrawData();
+	void copyDrawData(vk::CommandBuffer& cmd);
 	void recordCommandBuffer();
 	vk::UniqueCommandBuffer& getCommandBuffer();
 

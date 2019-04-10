@@ -5,6 +5,8 @@
 
 #include <glm/gtx/quaternion.hpp>
 
+#define MAX_LIGHTS 500'000
+
 struct Camera
 {
 	glm::vec3 position = { 0.0f, 0.0f, 0.0f };

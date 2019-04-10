@@ -13,9 +13,6 @@
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
-constexpr auto MAX_LIGHTS_PER_TILE = 1024;
-constexpr auto MAX_POINTLIGHTS = 500000;
-
 
 // todo refactor structs
 struct CameraUBO
@@ -106,6 +103,8 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 		data->cameraPosition = campos;
 
 		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
+
+		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
 	}
 }
 
@@ -1071,11 +1070,10 @@ void Renderer::createClusteredBuffers()
 
 void Renderer::createLights()
 {
-	// constexpr vk::DeviceSize lightsOutSize = sizeof(uint32_t) * (MAX_LIGHTS_PER_TILE + 1) * TILE_COUNT_X * TILE_COUNT_Y; // ... + 1 => storing light counter for tile
-	constexpr vk::DeviceSize pointLightsSize = sizeof(PointLight) * MAX_POINTLIGHTS/* + sizeof(glm::vec4)*/; // ... + size of LightParams struct
-	constexpr vk::DeviceSize indirectionSize = MAX_POINTLIGHTS * 8 * 5 * 4; // swap buffer // todo find right value
-	constexpr vk::DeviceSize lightsOutSize = indirectionSize; // ... + 1 => storing light counter for tile
-	constexpr vk::DeviceSize splittersSize = 1024 * sizeof(uint32_t) * 2;
+	constexpr vk::DeviceSize pointLightsSize = sizeof(PointLight) * MAX_LIGHTS;
+	constexpr vk::DeviceSize indirectionSize = MAX_LIGHTS * 20; // every sceen need to tweak this value
+	constexpr vk::DeviceSize lightsOutSize = indirectionSize;
+	constexpr vk::DeviceSize splittersSize = 1024 * sizeof(uint32_t) * 2; // todo remove in final prob
 	mLightsOutOffset = 0;
 	mPointLightsOffset = lightsOutSize;
 	mLightsIndirectionOffset = mPointLightsOffset + pointLightsSize;
@@ -1309,12 +1307,6 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = 1;
 
-		vk::BufferMemoryBarrier barrier;
-		barrier.size = sizeof(CameraUBO);
-		barrier.buffer = *mCameraUniformBuffer.handle;
-		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-		barrier.dstAccessMask = vk::AccessFlagBits::eUniformRead;
-
 		mGBufferCommandBuffer = std::move(mContext.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
 
 		auto& cmd = *mGBufferCommandBuffer;
@@ -1323,9 +1315,6 @@ void Renderer::createGraphicsCommandBuffers()
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 
 		cmd.begin(beginInfo);
-		
-		mUtility.recordCopyBuffer(cmd, *mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eVertexShader, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
 
 		vk::RenderPassBeginInfo renderpassInfo;
 		renderpassInfo.renderPass = *mGBufferRenderpass;
@@ -1699,8 +1688,8 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	auto memorySize = sizeof(PointLight) * mLightsCount + sizeof(glm::vec4);
 	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize + 8192));
 
-	mContext.getDevice().waitForFences(1, &*mLightCopyFence, true, std::numeric_limits<uint64_t>::max());
-	mContext.getDevice().resetFences(1, &*mLightCopyFence);
+	// mContext.getDevice().waitForFences(1, &*mLightCopyFence, true, std::numeric_limits<uint64_t>::max());
+	// mContext.getDevice().resetFences(1, &*mLightCopyFence);
 
 	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {mSwapchainExtent.width, mSwapchainExtent.height} };
 	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
@@ -1726,15 +1715,15 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	submitInfo.pCommandBuffers = &*mLightCopyCommandBuffer;
 	submitInfo.pSignalSemaphores = &*mLightCopyFinishedSemaphore;
 
-	mContext.getComputeQueue().submit(1, &submitInfo, *mLightCopyFence);
+	mContext.getComputeQueue().submit(1, &submitInfo, nullptr);
 	lightsUpdate = true;
 }
 
 void Renderer::drawFrame()
 {
-	// wait for fences
-	mContext.getDevice().waitForFences({ *mFences[mCurrentFrame] }, true, std::numeric_limits<uint64_t>::max());
-	mContext.getDevice().resetFences({ *mFences[mCurrentFrame] });
+	// // wait for fences
+	// mContext.getDevice().waitForFences({ *mFences[mCurrentFrame] }, true, std::numeric_limits<uint64_t>::max());
+	// mContext.getDevice().resetFences({ *mFences[mCurrentFrame] });
 
 	// Acquire an image from the swap chain
 	uint32_t imageIndex;
@@ -1872,7 +1861,7 @@ void Renderer::drawFrame()
 		submitInfos.emplace_back(submitInfo);
 	}
 
-	mContext.getGeneralQueue().submit(submitInfos, *mFences[mCurrentFrame]);
+	mContext.getGeneralQueue().submit(submitInfos, nullptr);
 
 	// 3. Submitting the result back to the swap chain to show it on screen
 	{
@@ -1899,7 +1888,7 @@ void Renderer::drawFrame()
 
 	}
 
-	mContext.getDevice().waitIdle();
+	mContext.getGeneralQueue().waitIdle();
 	mCurrentFrame = (mCurrentFrame + 1) % mSwapchainImages.size();
 }
 
