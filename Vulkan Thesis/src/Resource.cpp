@@ -69,6 +69,11 @@ void Fence::add(const std::string& key, size_t count)
 	mData.insert_or_assign(key, std::move(fen));
 }
 
+const vk::CommandBuffer& CommandBuffer::add(const std::string& key, vk::CommandBufferAllocateInfo& info)
+{
+	return *mData.insert_or_assign(key, mDevice.allocateCommandBuffersUnique(info)).first->second[0];
+}
+
 Resources::Resources(const vk::Device device)
 	: pipelineLayout(device)
 	, pipeline(device)
@@ -77,6 +82,7 @@ Resources::Resources(const vk::Device device)
 	, shaderModule(device)
 	, semaphore(device)
 	, fence(device)
+	, cmd(device)
 {
 }
 

@@ -77,7 +77,7 @@ void Renderer::resize()
 void Renderer::requestDraw(float deltatime)
 {
 	updateUniformBuffers(/*deltatime*/);
-	submitLightSortingCmds(0);
+	submitLightSortingCmds(mCurrentFrame);
 	drawFrame();
 }
 
@@ -1235,9 +1235,7 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = 1;
 
-		mGBufferCommandBuffer = std::move(mContext.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
-
-		auto& cmd = *mGBufferCommandBuffer;
+		auto& cmd = mResource.cmd.add("gBuffer", allocInfo);
 
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
@@ -1288,11 +1286,11 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.commandPool = mContext.getStaticCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::eSecondary;
 		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
-		mCompositionCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
-
+		mResource.cmd.add("composition", allocInfo);
+		
 		allocInfo.commandPool = mContext.getDynamicCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
-		mPrimaryCompositionCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+		mResource.cmd.add("primaryComposition", allocInfo);
 	}
 
 	// debug
@@ -1301,11 +1299,11 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.commandPool = mContext.getStaticCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::eSecondary;
 		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
-		mDebugCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+		mResource.cmd.add("debug", allocInfo);
 
 		allocInfo.commandPool = mContext.getDynamicCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
-		mPrimaryDebugCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+		mResource.cmd.add("primaryDebug", allocInfo);
 		
 		vk::CommandBufferInheritanceInfo inheritanceInfo;
 		inheritanceInfo.renderPass = *mCompositionRenderpass;
@@ -1316,7 +1314,7 @@ void Renderer::createGraphicsCommandBuffers()
 		beginInfo.pInheritanceInfo = &inheritanceInfo;
 
 		// record command buffers
-		for (auto& cmd : mDebugCommandBuffers)
+		for (auto& cmd : mResource.cmd.getAll("debug"))
 		{
 			cmd->begin(beginInfo);
 			cmd->bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("debug"));
@@ -1448,21 +1446,21 @@ void Renderer::createComputeCommandBuffer()
 		allocInfo.commandPool = mContext.getDynamicCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
-		mPrimaryLightCullingCommandBuffer = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+		mResource.cmd.add("primaryLightCulling", allocInfo);
 
 		allocInfo.level = vk::CommandBufferLevel::eSecondary;
 		allocInfo.commandPool = mContext.getStaticCommandPool();
-		allocInfo.commandBufferCount = 2;
-		mSecondaryLightCullingCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+		allocInfo.commandBufferCount = 1;
+		mResource.cmd.add("secondaryLightCulling", allocInfo);
 
 		// light sorting buffers
 		allocInfo.commandPool = mContext.getComputeCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
-		mLightSortingCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+		mResource.cmd.add("lightSorting", allocInfo);
 
 		allocInfo.commandBufferCount = 1;
-		mLightCopyCommandBuffer = std::move(mContext.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
+		mResource.cmd.add("lightCopy", allocInfo);
 	}
 
 	// Record command buffer
@@ -1486,9 +1484,8 @@ void Renderer::createComputeCommandBuffer()
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 		
 		{
-			auto& cmd = *mSecondaryLightCullingCommandBuffers[0];
+			auto& cmd = mResource.cmd.get("secondaryLightCulling");
 			cmd.begin(beginInfo);
-
 				cmd.fillBuffer(*mClusteredBuffer.handle, 0, VK_WHOLE_SIZE, 0); // todo weird barrier
 				
 				cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion , nullptr, nullptr, nullptr); 
@@ -1547,13 +1544,15 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	vk::CommandBufferBeginInfo beginInfo;
 	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
 
-	mLightCopyCommandBuffer->begin(beginInfo);
-	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset);
-	mLightCopyCommandBuffer->end();
+	auto& cmd = mResource.cmd.get("lightCopy");
+
+	cmd.begin(beginInfo);
+	mUtility.recordCopyBuffer(cmd, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset);
+	cmd.end();
 
 	vk::SubmitInfo submitInfo;
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &*mLightCopyCommandBuffer;
+	submitInfo.pCommandBuffers = &cmd;
 	submitInfo.pSignalSemaphores = &mResource.semaphore.get("lightCopyFinished");
 
 	mContext.getComputeQueue().submit(1, &submitInfo, nullptr);
@@ -1591,7 +1590,7 @@ void Renderer::drawFrame()
 		submitInfo.pWaitSemaphores = &mResource.semaphore.get("imageAvailable", imageIndex);
 		submitInfo.pWaitDstStageMask = &waitStages;
 		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &*mGBufferCommandBuffer;
+		submitInfo.pCommandBuffers = &mResource.cmd.get("gBuffer");
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = &mResource.semaphore.get("gBufferFinished");
 
@@ -1605,6 +1604,8 @@ void Renderer::drawFrame()
 	{
 		// submit light culling
 		submitLightCullingCmds(imageIndex);
+	
+		auto& cmd = mResource.cmd.get("primaryComposition", imageIndex);
 
 		// build composition
 		{
@@ -1624,8 +1625,6 @@ void Renderer::drawFrame()
 
 			renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 			renderpassInfo.pClearValues = clearValues.data();
-
-			auto& cmd = *mPrimaryCompositionCommandBuffers[imageIndex];
 
 			cmd.begin(vk::CommandBufferBeginInfo{});
 			cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
@@ -1649,7 +1648,7 @@ void Renderer::drawFrame()
 			submitInfo.pWaitSemaphores = &mResource.semaphore.get("lightCullingFinished");
 			submitInfo.pWaitDstStageMask = &waitStages;
 			submitInfo.commandBufferCount = 1;
-			submitInfo.pCommandBuffers = &*mPrimaryCompositionCommandBuffers[imageIndex];
+			submitInfo.pCommandBuffers = &cmd;
 			submitInfo.signalSemaphoreCount = 1;
 			submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
 
@@ -1658,6 +1657,8 @@ void Renderer::drawFrame()
 	}
 	else
 	{
+		auto& cmd = mResource.cmd.get("primaryDebug", imageIndex);
+
 		// build debug
 		{
 			vk::RenderPassBeginInfo renderpassInfo;
@@ -1672,25 +1673,28 @@ void Renderer::drawFrame()
 			renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 			renderpassInfo.pClearValues = clearValues.data();
 
-			auto& cmd = *mPrimaryDebugCommandBuffers[imageIndex];
 
 			cmd.begin(vk::CommandBufferBeginInfo{});
 			cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
-			cmd.executeCommands(1, &*mDebugCommandBuffers[imageIndex]);
+			cmd.executeCommands(1, &mResource.cmd.get("debug", imageIndex));
 			cmd.nextSubpass(vk::SubpassContents::eSecondaryCommandBuffers);
 			cmd.executeCommands(1, &cmdUI);
 			cmd.endRenderPass();
 			cmd.end();
 		}
 		// debugging
-		vk::PipelineStageFlags waitStages = vk::PipelineStageFlagBits::eFragmentShader;
+		std::array<vk::PipelineStageFlags, 2> waitStages = {vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eTopOfPipe};
+		std::array<vk::Semaphore, 2> semaphores = {
+			mResource.semaphore.get("gBufferFinished"),
+			mResource.semaphore.get("lightSortingFinished")
+		};
 
 		vk::SubmitInfo submitInfo;
-		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &mResource.semaphore.get("gBufferFinished");
-		submitInfo.pWaitDstStageMask = &waitStages;
+		submitInfo.waitSemaphoreCount = 2;
+		submitInfo.pWaitSemaphores = semaphores.data();
+		submitInfo.pWaitDstStageMask = waitStages.data();
 		submitInfo.commandBufferCount = 1;
-		submitInfo.pCommandBuffers = &*mPrimaryDebugCommandBuffers[imageIndex];
+		submitInfo.pCommandBuffers = &cmd;
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
 
@@ -1730,7 +1734,7 @@ void Renderer::drawFrame()
 
 void Renderer::submitLightCullingCmds(size_t imageIndex)
 {
-	auto& cmd = *mPrimaryLightCullingCommandBuffer[imageIndex];
+	auto& cmd = mResource.cmd.get("primaryLightCulling", imageIndex);
 
 	std::array<vk::DescriptorSet, 2> descriptorSets{ 
 mResource.descriptorSet.get("camera"),
@@ -1738,7 +1742,7 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 	};
 	// record 
 	cmd.begin(vk::CommandBufferBeginInfo{});
-	cmd.executeCommands(1, &*mSecondaryLightCullingCommandBuffers[0]);
+	cmd.executeCommands(1, &mResource.cmd.get("secondaryLightCulling"));
 
 	// light culling
 	{
@@ -1788,7 +1792,7 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 
 void Renderer::submitLightSortingCmds(size_t imageIndex)
 {
-	auto& cmd = *mLightSortingCommandBuffers[imageIndex];
+	auto& cmd = mResource.cmd.get("lightSorting", imageIndex);
 
 	std::array<vk::DescriptorSet, 2> descriptorSets{ 
 mResource.descriptorSet.get("camera"),

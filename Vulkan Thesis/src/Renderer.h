@@ -68,17 +68,6 @@ private:
 	size_t mCurrentFrame = 0;
 
 	vk::UniquePipelineCache mPipelineCache;
-
-	// command buffers
-	vk::UniqueCommandBuffer mLightCopyCommandBuffer;
-	std::vector<vk::UniqueCommandBuffer> mPrimaryCompositionCommandBuffers;
-	std::vector<vk::UniqueCommandBuffer> mCompositionCommandBuffers;
-	std::vector<vk::UniqueCommandBuffer> mPrimaryLightCullingCommandBuffer;
-	std::vector<vk::UniqueCommandBuffer> mSecondaryLightCullingCommandBuffers;
-	std::vector<vk::UniqueCommandBuffer> mLightSortingCommandBuffers;
-	vk::UniqueCommandBuffer mGBufferCommandBuffer;
-	std::vector<vk::UniqueCommandBuffer> mPrimaryDebugCommandBuffers;
-	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffers;
 	
 	// G Buffer
 	GBuffer mGBufferAttachments;

@@ -32,6 +32,11 @@ namespace resource
 			return *mData.at(key).at(index);
 		}
 
+		const std::vector<U>& getAll(const std::string& key) const
+		{
+			return mData.at(key);
+		}
+
 	protected:
 		std::unordered_map<std::string, std::vector<U>> mData;
 		vk::Device mDevice;
@@ -94,6 +99,15 @@ namespace resource
 		void add(const std::string& key, size_t count = 1);
 	};
 
+	class CommandBuffer : public BaseVector<vk::UniqueCommandBuffer, vk::CommandBuffer>
+	{
+	public:
+		explicit CommandBuffer(const vk::Device device) : BaseVector(device) {}
+
+		const vk::CommandBuffer& add(const std::string& key, vk::CommandBufferAllocateInfo& info);
+	};
+
+
 	struct Resources
 	{
 		explicit Resources(const vk::Device device);
@@ -105,6 +119,7 @@ namespace resource
 		ShaderModule shaderModule;
 		Semaphore semaphore;
 		Fence fence;
+		CommandBuffer cmd;
 	};
 }
 
