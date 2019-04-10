@@ -13,8 +13,6 @@
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
-
-// todo refactor structs
 struct CameraUBO
 {
 	glm::mat4 view;
@@ -52,7 +50,9 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createSwapChain();
 	createSwapChainImageViews();
 	createGBuffers();
+	createSampler();
 	createRenderPasses();
+	createFrameBuffers();
 	createDescriptorSetLayouts();
 	createPipelineCache();
 	createGraphicsPipelines();
@@ -61,9 +61,9 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createClusteredBuffers();
 	createLights();
 	createDescriptorPool();
-	// mModel.loadModel(mContext, "data/models/sponza.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
-	mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mGBufferAttachments.sampler, *mDescriptorPool, mResource, pool);
-	createDescriptorSets();
+	// mModel.loadModel(mContext, "data/models/sponza.obj", *mSampler, *mDescriptorPool, mResource, pool);
+	mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mSampler, *mDescriptorPool, mResource, pool);
+	updateDescriptorSets();
 	createGraphicsCommandBuffers();
 	createComputeCommandBuffer();
 	createSyncPrimitives();
@@ -93,7 +93,7 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 		auto data = reinterpret_cast<CameraUBO*>(mContext.getDevice().mapMemory(*mCameraStagingBuffer.memory, 0, sizeof(CameraUBO)));
 		data->view = view;
 		data->projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.5f, 100.0f);
-		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down TODO extension viewport -1
+		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
 		data->invProj = glm::inverse(data->projection);
 		data->cameraPosition = campos;
 		data->screenSize = {mSwapchainExtent.width, mSwapchainExtent.height};
@@ -130,7 +130,8 @@ void Renderer::recreateSwapChain()
 	createSwapChain();
 	createSwapChainImageViews();
 	createGBuffers();
-	createRenderPasses();
+	createFrameBuffers();
+	updateDescriptorSets();
 	createGraphicsPipelines();
 	createGraphicsCommandBuffers();
 	createComputePipeline();
@@ -300,23 +301,6 @@ void Renderer::createRenderPasses()
 		renderpassInfo.pDependencies = dependencies.data();
 
 		mGBufferRenderpass = mContext.getDevice().createRenderPassUnique(renderpassInfo);
-
-		std::vector<vk::ImageView> attachments = {
-			*mGBufferAttachments.position.view,
-			*mGBufferAttachments.color.view,
-			*mGBufferAttachments.normal.view,
-			*mGBufferAttachments.depth.view
-		};
-
-		vk::FramebufferCreateInfo framebufferInfo;
-		framebufferInfo.renderPass = *mGBufferRenderpass;
-		framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-		framebufferInfo.pAttachments = attachments.data();
-		framebufferInfo.width = mSwapchainExtent.width;
-		framebufferInfo.height = mSwapchainExtent.height;
-		framebufferInfo.layers = 1;
-
-		mGBufferFramebuffer = mContext.getDevice().createFramebufferUnique(framebufferInfo);
 	}
 
 	// composition + UI
@@ -381,13 +365,39 @@ void Renderer::createRenderPasses()
 		renderpassInfo.pDependencies = dependencies.data();
 
 		mCompositionRenderpass = mContext.getDevice().createRenderPassUnique(renderpassInfo);
+	}
+}
 
+void Renderer::createFrameBuffers()
+{
+	// gbuffers
+	{
+		std::vector<vk::ImageView> attachments = {
+			*mGBufferAttachments.position.view,
+			*mGBufferAttachments.color.view,
+			*mGBufferAttachments.normal.view,
+			*mGBufferAttachments.depth.view
+		};
+
+		vk::FramebufferCreateInfo framebufferInfo;
+		framebufferInfo.renderPass = *mGBufferRenderpass;
+		framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		framebufferInfo.pAttachments = attachments.data();
+		framebufferInfo.width = mSwapchainExtent.width;
+		framebufferInfo.height = mSwapchainExtent.height;
+		framebufferInfo.layers = 1;
+
+		mGBufferFramebuffer = mContext.getDevice().createFramebufferUnique(framebufferInfo);
+	}
+
+	// composition
+	{
 		mSwapchainFramebuffers.clear();
 		mSwapchainFramebuffers.reserve(mSwapchainImageViews.size());
 
 		for (const auto& view : mSwapchainImageViews)
 		{
-			std::array<vk::ImageView, 1> attachments = { *view/*, *mDepthImage.view*/ };
+			std::vector<vk::ImageView> attachments = { *view };
 
 			vk::FramebufferCreateInfo framebufferInfo;
 			framebufferInfo.renderPass = *mCompositionRenderpass;
@@ -400,6 +410,7 @@ void Renderer::createRenderPasses()
 			mSwapchainFramebuffers.emplace_back(mContext.getDevice().createFramebufferUnique(framebufferInfo));
 		}
 	}
+
 }
 
 void Renderer::createDescriptorSetLayouts()
@@ -894,22 +905,22 @@ void Renderer::createGBuffers()
 
 		mGBufferAttachments.normal.view = mUtility.createImageView(*mGBufferAttachments.normal.handle, mGBufferAttachments.normal.format, vk::ImageAspectFlagBits::eColor);
 	}
+}
 
-	// sampler for attachments
-	{
-		vk::SamplerCreateInfo samplerInfo;
-		samplerInfo.magFilter = vk::Filter::eLinear;
-		samplerInfo.minFilter = vk::Filter::eLinear;
-		samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
-		samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
-		samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
-		samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-		samplerInfo.minLod = 0.0f;
-		samplerInfo.maxLod = 1.0f;
-		samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
+void Renderer::createSampler()
+{
+	vk::SamplerCreateInfo samplerInfo;
+	samplerInfo.magFilter = vk::Filter::eLinear;
+	samplerInfo.minFilter = vk::Filter::eLinear;
+	samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+	samplerInfo.minLod = 0.0f;
+	samplerInfo.maxLod = 1.0f;
+	samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
 
-		mGBufferAttachments.sampler = mContext.getDevice().createSamplerUnique(samplerInfo);
-	}
+	mSampler = mContext.getDevice().createSamplerUnique(samplerInfo);
 }
 
 void Renderer::createUniformBuffers()
@@ -1048,7 +1059,7 @@ void Renderer::createDescriptorPool()
 	mDescriptorPool = mContext.getDevice().createDescriptorPoolUnique(poolInfo);
 }
 
-void Renderer::createDescriptorSets()
+void Renderer::updateDescriptorSets()
 {
 	std::vector<vk::WriteDescriptorSet> descriptorWrites;
 	
@@ -1123,7 +1134,7 @@ void Renderer::createDescriptorSets()
 	splittersInfo.range = mSplittersSize;
 
 	vk::DescriptorImageInfo depthInfo;
-	depthInfo.sampler = *mGBufferAttachments.sampler;
+	depthInfo.sampler = *mSampler;
 	depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	depthInfo.imageView = *mGBufferAttachments.depth.view;
 	{
@@ -1160,17 +1171,17 @@ void Renderer::createDescriptorSets()
 	
 	// composition
 	vk::DescriptorImageInfo positionInfo;
-	positionInfo.sampler = *mGBufferAttachments.sampler;
+	positionInfo.sampler = *mSampler;
 	positionInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	positionInfo.imageView = *mGBufferAttachments.position.view;
 
 	vk::DescriptorImageInfo albedoInfo;
-	albedoInfo.sampler = *mGBufferAttachments.sampler;
+	albedoInfo.sampler = *mSampler;
 	albedoInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	albedoInfo.imageView = *mGBufferAttachments.color.view;
 
 	vk::DescriptorImageInfo normalInfo;
-	normalInfo.sampler = *mGBufferAttachments.sampler;
+	normalInfo.sampler = *mSampler;
 	normalInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	normalInfo.imageView = *mGBufferAttachments.normal.view;
 	{
@@ -1587,7 +1598,7 @@ void Renderer::drawFrame()
 
 		vk::SubmitInfo submitInfo;
 		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &mResource.semaphore.get("imageAvailable", imageIndex);
+		submitInfo.pWaitSemaphores = &mResource.semaphore.get("imageAvailable", mCurrentFrame);
 		submitInfo.pWaitDstStageMask = &waitStages;
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &mResource.cmd.get("gBuffer");
@@ -1650,7 +1661,7 @@ void Renderer::drawFrame()
 			submitInfo.commandBufferCount = 1;
 			submitInfo.pCommandBuffers = &cmd;
 			submitInfo.signalSemaphoreCount = 1;
-			submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
+			submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", mCurrentFrame);
 
 			submitInfos.emplace_back(submitInfo);
 		}
@@ -1696,7 +1707,7 @@ void Renderer::drawFrame()
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &cmd;
 		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
+		submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", mCurrentFrame);
 
 		submitInfos.emplace_back(submitInfo);
 	}
@@ -1707,7 +1718,7 @@ void Renderer::drawFrame()
 	{
 		vk::PresentInfoKHR presentInfo;
 		presentInfo.waitSemaphoreCount = 1;
-		presentInfo.pWaitSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
+		presentInfo.pWaitSemaphores = &mResource.semaphore.get("renderFinished", mCurrentFrame);
 		presentInfo.swapchainCount = 1;
 		presentInfo.pSwapchains = &*mSwapchain;
 		presentInfo.pImageIndices = &imageIndex;

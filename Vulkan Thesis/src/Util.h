@@ -42,7 +42,6 @@ struct GBuffer
 	ImageParameters position;
 	ImageParameters color;
 	ImageParameters normal;
-	vk::UniqueSampler sampler;
 };
 
 namespace util

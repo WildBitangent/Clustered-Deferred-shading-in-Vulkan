@@ -5,7 +5,7 @@
 #include <iostream>
 #include <vulkan/vulkan.hpp>
 
-#ifndef NDEBUG
+#ifndef DEBUG
 #define ENABLE_VALIDATION_LAYERS
 #endif
 

@@ -28,15 +28,17 @@ private:
 	void createSwapChain();
 	void createSwapChainImageViews();
 	void createRenderPasses();
+	void createFrameBuffers();
 	void createDescriptorSetLayouts();
 	void createPipelineCache();
 	void createGraphicsPipelines();
 	void createGBuffers();
+	void createSampler();
 	void createUniformBuffers();
 	void createClusteredBuffers();
 	void createLights();
 	void createDescriptorPool();
-	void createDescriptorSets();
+	void updateDescriptorSets();
 	void createGraphicsCommandBuffers();
 	void createSyncPrimitives();
 
@@ -71,8 +73,9 @@ private:
 	
 	// G Buffer
 	GBuffer mGBufferAttachments;
+	vk::UniqueSampler mSampler;
 	vk::UniqueRenderPass mGBufferRenderpass;
-	vk::UniqueFramebuffer mGBufferFramebuffer;
+	vk::UniqueFramebuffer mGBufferFramebuffer; // todo multiple, fix ping pong
 
 	// composition
 	vk::UniqueRenderPass mCompositionRenderpass;
