@@ -4,6 +4,7 @@
 #include "UI.h"
 
 #include <glm/gtx/quaternion.hpp>
+#include <unordered_map>
 
 #define MAX_LIGHTS 500'000
 
@@ -66,26 +67,12 @@ private:
 	glm::vec2 mPrevCursorPos = { 0,0 };
 	float mPitch = 0.0f;
 	float mYaw = 0.0f;
-
-	bool mRMBDown = false;
-	bool mLMBDown = false;
-	bool mWDown = false;
-	bool mSDown = false;
-	bool mADown = false;
-	bool mDDown = false;
-
-	bool mLeftDown = false;
-	bool mRightDown = false;
-	bool mForwardDown = false;
-	bool mBackwardDown = false;
-	bool mUpDown = false;
-	bool mDownDown = false;
-
+	
+	std::unordered_map<int, bool> mKeyPressed;
 
 private:
 	GLFWwindow* mWindow = createWindow();
 	std::unique_ptr<ThreadPool>	mThreadPool; // deferred initialization
 	Renderer mRenderer;
 	UI mUI;
-	
 };

@@ -205,7 +205,7 @@ void BaseApp::tick(float dt)
 	}
 
 
-	if (mRMBDown)
+	if (mKeyPressed[GLFW_MOUSE_BUTTON_RIGHT])
 	{
 		int width, height;
 	    glfwGetFramebufferSize(mWindow, &width, &height);
@@ -223,66 +223,35 @@ void BaseApp::tick(float dt)
 		mPrevCursorPos = mCursorPos;
 	}
 
-	if (mWDown)
+	if (mKeyPressed[GLFW_KEY_W])
 		mCamera.position += mCamera.rotation * glm::vec3(0.0f, 0.0f, -1.0f) * mCamera.moveSpeed * dt;
 
-	if (mSDown)
+	if (mKeyPressed[GLFW_KEY_S])
 		mCamera.position -= mCamera.rotation * glm::vec3(0.0f, 0.0f, -1.0f) * mCamera.moveSpeed * dt;
 
-	if (mADown)
+	if (mKeyPressed[GLFW_KEY_A])
 		mCamera.position -= mCamera.rotation * glm::vec3(1.0f, 0.0f, 0.0f) * mCamera.moveSpeed * dt;
 
-	if (mDDown)
+	if (mKeyPressed[GLFW_KEY_D])
 		mCamera.position += mCamera.rotation * glm::vec3(1.0f, 0.0f, 0.0f) * mCamera.moveSpeed * dt;
-
-	glm::vec3 speed = glm::vec3(3.0f);
-
-	if (mForwardDown)
-		mLights[0].position += speed * glm::vec3(0.0f, 0.0f, -1.0f) * dt;
-
-	if (mBackwardDown)
-		mLights[0].position -= speed * glm::vec3(0.0f, 0.0f, -1.0f) * dt;
-
-	if (mLeftDown)
-		mLights[0].position -= speed * glm::vec3(1.0f, 0.0f, 0.0f) * dt;
-
-	if (mRightDown)
-		mLights[0].position += speed * glm::vec3(1.0f, 0.0f, 0.0f) * dt;
-
-	if (mUpDown)
-		mLights[0].position += speed * glm::vec3(0.0f, 1.0f, 0.0f) * dt;
-
-	if (mDownDown)
-		mLights[0].position -= speed * glm::vec3(0.0f, 1.0f, 0.0f) * dt;
-
 }
 
 void BaseApp::onMouseButton(int button, int action, int mods)
 {
 	if (action == GLFW_PRESS) 
 	{
-		// double x, y;
-		// glfwGetCursorPos(mWindow, &x, &y);
-		// mCursorPos = { x, y };
-
+		mKeyPressed[button] = true;
 		if (button == GLFW_MOUSE_BUTTON_RIGHT)
 		{
-			mRMBDown = true;
 			mFirstMouse = true;
 			glfwSetInputMode(mWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		}
-		else if (button == GLFW_MOUSE_BUTTON_LEFT)
-			mLMBDown = true;
 	}
 	else if (action == GLFW_RELEASE)
 	{
+		mKeyPressed[button] = false;
 		if (button == GLFW_MOUSE_BUTTON_RIGHT)
-		{
-			mRMBDown = false;
 			glfwSetInputMode(mWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-		}
-		else if (button == GLFW_MOUSE_BUTTON_LEFT)
-			mLMBDown = false;
 	}
 }
 
@@ -290,91 +259,18 @@ void BaseApp::onKeyPress(int key, int scancode, int action, int mods)
 {
 	if (action == GLFW_PRESS)
 	{
-		switch (key)
-		{
-			// todo use a hash map or something
-		case GLFW_KEY_W:
-			mWDown = true;
-			break;
-		case GLFW_KEY_S:
-			mSDown = true;
-			break;
-		case GLFW_KEY_A:
-			mADown = true;
-			break;
-		case GLFW_KEY_D:
-			mDDown = true;
-			break;
+		mKeyPressed[key] = true;
 
-
-		case GLFW_KEY_KP_8:
-			mForwardDown = true;
-			break;
-		case GLFW_KEY_KP_5:
-			mBackwardDown = true;
-			break;
-		case GLFW_KEY_KP_4:
-			mLeftDown = true;
-			break;
-		case GLFW_KEY_KP_6:
-			mRightDown = true;
-			break;
-		case GLFW_KEY_LEFT_SHIFT:
-			mUpDown = true;
-			break;
-		case GLFW_KEY_LEFT_CONTROL:
-			mDownDown = true;
-			break;
-
-
-		case GLFW_KEY_ENTER:
-			mRenderer.reloadShaders(4 << (mUI.mContext.tileSize + 1));
-			mUI.mContext.shaderReloadDirtyBit = false;
-			break;
-		}
+		if (key == GLFW_KEY_ENTER)
+			mUI.mContext.shaderReloadDirtyBit = true;
 	}
 	else if (action == GLFW_RELEASE)
-	{
-		switch (key)
-		{
-		case GLFW_KEY_W:
-			mWDown = false;
-			break;
-		case GLFW_KEY_S:
-			mSDown = false;
-			break;
-		case GLFW_KEY_A:
-			mADown = false;
-			break;
-		case GLFW_KEY_D:
-			mDDown = false;
-			break;
-
-		case GLFW_KEY_KP_8:
-			mForwardDown = false;
-			break;
-		case GLFW_KEY_KP_5:
-			mBackwardDown = false;
-			break;
-		case GLFW_KEY_KP_4:
-			mLeftDown = false;
-			break;
-		case GLFW_KEY_KP_6:
-			mRightDown = false;
-			break;
-		case GLFW_KEY_LEFT_SHIFT:
-			mUpDown = false;
-			break;
-		case GLFW_KEY_LEFT_CONTROL:
-			mDownDown = false;
-			break;
-		}
-	}
+		mKeyPressed[key] = false;
 }
 
 void BaseApp::onCursorPosChange(double xPos, double yPos)
 {
-	if (mRMBDown)
+	if (mKeyPressed[GLFW_MOUSE_BUTTON_RIGHT])
 	{
 		mCursorPos = { xPos, yPos };
 
