@@ -71,8 +71,6 @@ private:
 
 	// command buffers
 	vk::UniqueCommandBuffer mLightCopyCommandBuffer;
-	// vk::UniqueCommandBuffer mCameraUBOCopyCommandBuffer;
-
 	std::vector<vk::UniqueCommandBuffer> mPrimaryCompositionCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mCompositionCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mPrimaryLightCullingCommandBuffer;
@@ -104,24 +102,23 @@ private:
 	std::vector<vk::UniqueFramebuffer> mSwapchainFramebuffers;
 
 	// uniform buffers
-	BufferParameters mObjectStagingBuffer; // TODO cahnge to host visible/coherent?
+	BufferParameters mObjectStagingBuffer;
 	BufferParameters mObjectUniformBuffer;
 	BufferParameters mCameraStagingBuffer;
 	BufferParameters mCameraUniformBuffer;
-	
 	BufferParameters mDebugUniformBuffer;
 
-	// TODO refactor
+	// Lights buffer
 	BufferParameters mLightsBuffers;
 	BufferParameters mPointLightsStagingBuffer;
 	vk::DeviceSize mLightsOutOffset;
 	vk::DeviceSize mPointLightsOffset;
-	vk::DeviceSize mLightsIndirectionOffset;
+	vk::DeviceSize mLightsOutSwapOffset;
 	vk::DeviceSize mSplittersOffset;
 
 	vk::DeviceSize mLightsOutSize;
 	vk::DeviceSize mPointLightsSize;
-	vk::DeviceSize mLightsIndirectionSize;
+	vk::DeviceSize mLightsOutSwap;
 	vk::DeviceSize mSplittersSize;
 
 	// Cluster buffer
@@ -133,19 +130,16 @@ private:
 	vk::DeviceSize mPageTableSize;
 	vk::DeviceSize mPagePoolSize;
 	vk::DeviceSize mUniqueClustersSize;
-
-	uint32_t mLightsCount; // for sorting
+	
+	glm::uvec2 mTileCount;
+	uint32_t mLightsCount;
 	size_t mCurrentTileSize = 32;
 	size_t mSubGroupSize;
 	
-	// todo rewrite this
+	// params for light culling created at light sorting
+	uint32_t mMaxLevel;
 	std::string mLightBufferSwapUsed = "lightculling_01";
-	uint32_t maxLevel;
-	std::vector<std::pair<uint32_t, uint32_t>> levelParam;
-
-	bool lightsUpdate = false;
-	
-	glm::uvec2 mTileCount;
+	std::vector<std::pair<uint32_t, uint32_t>> mLevelParam;
 
 	friend class UI;
 };

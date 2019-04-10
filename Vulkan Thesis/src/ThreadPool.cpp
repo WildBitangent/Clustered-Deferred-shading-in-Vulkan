@@ -73,7 +73,7 @@ void ThreadPool::addWorkMultiplex(const ThreadFuncPtr& work)
 void ThreadPool::addWork(std::vector<ThreadFuncPtr>&& work)
 {
 	for (size_t i = 0; i < work.size(); i++)
-		mThreads[i % mThreads.size()]->addWork(work[i]); // todo work queue - modulo prepared
+		mThreads[i % mThreads.size()]->addWork(work[i]);
 }
 
 void ThreadPool::wait()

@@ -176,7 +176,7 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	
 	spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
 	optimizer.SetMessageConsumer(msger);
-	optimizer.RegisterPerformancePasses();
+	// optimizer.RegisterPerformancePasses(); // todo turn on in final
 	
 	if (!optimizer.Run(spirV.data(), spirV.size(), &spirV))
 		throw std::runtime_error("Failed to optimize SpirV program: " + filename);

@@ -99,7 +99,6 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 		data->screenSize = {mSwapchainExtent.width, mSwapchainExtent.height};
 
 		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
-
 		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
 	}
 }
@@ -330,19 +329,7 @@ void Renderer::createRenderPasses()
 		colorAttachmentComposition.stencilLoadOp = vk::AttachmentLoadOp::eDontCare; // no stencil
 		colorAttachmentComposition.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
 		colorAttachmentComposition.initialLayout = vk::ImageLayout::eUndefined;
-		// colorAttachmentComposition.finalLayout = vk::ImageLayout::eColorAttachmentOptimal;
 		colorAttachmentComposition.finalLayout = vk::ImageLayout::ePresentSrcKHR; // to be directly used in swap chain
-
-		// vk::AttachmentDescription colorAttachmentUI;
-		// colorAttachmentUI.format = mSwapchainImageFormat;
-		// colorAttachmentUI.samples = vk::SampleCountFlagBits::e1;
-		// colorAttachmentUI.loadOp = vk::AttachmentLoadOp::eLoad; // before rendering
-		// colorAttachmentUI.storeOp = vk::AttachmentStoreOp::eStore; // after rendering
-		// colorAttachmentUI.stencilLoadOp = vk::AttachmentLoadOp::eDontCare; // no stencil
-		// colorAttachmentUI.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-		// colorAttachmentUI.initialLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		// colorAttachmentUI.finalLayout = vk::ImageLayout::ePresentSrcKHR; // to be directly used in swap chain
-		
 
 		vk::AttachmentReference colorAttachmentRef;
 		colorAttachmentRef.attachment = 0;
@@ -417,7 +404,7 @@ void Renderer::createRenderPasses()
 
 void Renderer::createDescriptorSetLayouts()
 {
-	// World transform (desc 0)
+	// Camera UBO
 	{
 		// View, Proj
 		vk::DescriptorSetLayoutBinding uboBinding;
@@ -680,11 +667,6 @@ void Renderer::createGraphicsPipelines()
 		blendingInfo.attachmentCount = 1;
 		blendingInfo.pAttachments = &colorblendAttachment;
 
-		//vk::PushConstantRange pushconstantRange;
-		//pushconstantRange.offset = 0;
-		//pushconstantRange.size = sizeof(PushConstantObject);
-		//pushconstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
-
 		std::vector<vk::DescriptorSetLayout> setLayouts = {
 			mResource.descriptorSetLayout.get("camera"),
 			mResource.descriptorSetLayout.get("composition")
@@ -693,8 +675,6 @@ void Renderer::createGraphicsPipelines()
 		vk::PipelineLayoutCreateInfo layoutInfo;
 		layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 		layoutInfo.pSetLayouts = setLayouts.data();
-		//layoutInfo.pushConstantRangeCount = 1; 
-		//layoutInfo.pPushConstantRanges = &pushconstantRange; 
 
 		auto layout = mResource.pipelineLayout.add("composition", layoutInfo);
 
@@ -824,11 +804,6 @@ void Renderer::createGraphicsPipelines()
 
 		rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
 
-		//vk::PushConstantRange pushconstantRange;
-		//pushconstantRange.offset = 0;
-		//pushconstantRange.size = sizeof(PushConstantObject);
-		//pushconstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
-
 		std::vector<vk::DescriptorSetLayout> setLayouts = {
 			mResource.descriptorSetLayout.get("camera"),
 			mResource.descriptorSetLayout.get("model"), 
@@ -838,8 +813,6 @@ void Renderer::createGraphicsPipelines()
 		vk::PipelineLayoutCreateInfo layoutInfo;
 		layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 		layoutInfo.pSetLayouts = setLayouts.data();
-		//layoutInfo.pushConstantRangeCount = 1; 
-		//layoutInfo.pPushConstantRanges = &pushconstantRange; 
 
 		auto layout = mResource.pipelineLayout.add("gbuffers", layoutInfo);
 
@@ -881,31 +854,6 @@ void Renderer::createGBuffers()
 		);
 
 		mGBufferAttachments.depth.view = mUtility.createImageView(*mGBufferAttachments.depth.handle, depthFormat, vk::ImageAspectFlagBits::eDepth);
-		// mUtility.transitImageLayout(*mGBufferAttachments.depth.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eShaderReadOnlyOptimal);
-		
-		// auto cmd = mUtility.beginSingleTimeCommands();
-		// vk::ImageMemoryBarrier barrier;
-		// barrier.oldLayout = vk::ImageLayout::eUndefined;
-		// barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-		// barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		// barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		// barrier.image = *mGBufferAttachments.depth.handle;
-		//
-		// barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
-		// barrier.subresourceRange.baseMipLevel = 0;
-		// barrier.subresourceRange.levelCount = 1;
-		// barrier.subresourceRange.baseArrayLayer = 0;
-		// barrier.subresourceRange.layerCount = 1;
-		//
-		// barrier.srcAccessMask = {};
-		// barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-		//
-		// vk::PipelineStageFlags srcStage = vk::PipelineStageFlagBits::eTopOfPipe;
-		// vk::PipelineStageFlags dstStage = vk::PipelineStageFlagBits::eTopOfPipe;
-		//
-		// cmd.pipelineBarrier(srcStage, dstStage, {}, nullptr, nullptr, barrier);
-		//
-		// mUtility.endSingleTimeCommands(cmd);
 	}
 
 	// position
@@ -919,7 +867,6 @@ void Renderer::createGBuffers()
 		);
 
 		mGBufferAttachments.position.view = mUtility.createImageView(*mGBufferAttachments.position.handle, mGBufferAttachments.position.format, vk::ImageAspectFlagBits::eColor);
-		// mUtility.transitImageLayout(*mGBufferAttachments.position.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 	}
 
 	// color
@@ -933,7 +880,6 @@ void Renderer::createGBuffers()
 		);
 
 		mGBufferAttachments.color.view = mUtility.createImageView(*mGBufferAttachments.color.handle, mGBufferAttachments.color.format, vk::ImageAspectFlagBits::eColor);
-		// mUtility.transitImageLayout(*mGBufferAttachments.color.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 	}
 
 	// normal
@@ -947,7 +893,6 @@ void Renderer::createGBuffers()
 		);
 
 		mGBufferAttachments.normal.view = mUtility.createImageView(*mGBufferAttachments.normal.handle, mGBufferAttachments.normal.format, vk::ImageAspectFlagBits::eColor);
-		// mUtility.transitImageLayout(*mGBufferAttachments.normal.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
 	}
 
 	// sampler for attachments
@@ -955,9 +900,6 @@ void Renderer::createGBuffers()
 		vk::SamplerCreateInfo samplerInfo;
 		samplerInfo.magFilter = vk::Filter::eLinear;
 		samplerInfo.minFilter = vk::Filter::eLinear;
-		// samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-		// samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-		// samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
 		samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
 		samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
 		samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
@@ -990,10 +932,9 @@ void Renderer::createUniformBuffers()
 	}
 
 	// Adding data to scene object buffer
-	{ // TODO refactor this
+	{ 
 		ObjectUBO ubo;
 		ubo.model = glm::scale(glm::mat4(1.f), glm::vec3(0.01f)); // TODO update uniform for objects
-		//ubo.model[3][3] = 1.0f;
 	
 		auto data = mContext.getDevice().mapMemory(*mObjectStagingBuffer.memory, 0, sizeof(ubo), {});
 		memcpy(data, &ubo, sizeof(ubo));
@@ -1030,35 +971,30 @@ void Renderer::createUniformBuffers()
 
 void Renderer::createClusteredBuffers()
 {
-	// key size [10, 7, 7]	24b
-	//			[ z, y, x]
-	// page size 2^9		512B
-	// key count / page size ... 2^24 / 2^9
+	auto alignedMemorySize = [this](vk::DeviceSize size)
+	{
+		const auto align = mContext.getPhysicalDevice().getProperties().limits.minStorageBufferOffsetAlignment;
+		return ((size - 1) / align + 1) * align;
+	};
 	
 	// page table
-	constexpr vk::DeviceSize pageTableSize = (32'768 + 3) * sizeof(uint32_t) + 32 - (32'771 * 4 % 0x20); // todo rewrite all this shit
 	mPageTableOffset = 0;
-	mPageTableSize = pageTableSize;
+	mPageTableSize = alignedMemorySize((32'768 + 3) * sizeof(uint32_t)); 
 
 	// physical page pool
 	constexpr vk::DeviceSize pageCount = 2048;
-	constexpr vk::DeviceSize pageSize = 512 * sizeof(uint32_t) + 32 - (512 * 4 % 0x20);
+	constexpr vk::DeviceSize pageSize = 512 * sizeof(uint32_t);
 	
-	constexpr vk::DeviceSize pagePoolSize = pageCount * pageSize;
-	mPagePoolOffset = pageTableSize;
-	mPagePoolSize = pagePoolSize;
+	mPagePoolOffset = mPageTableSize;
+	mPagePoolSize = alignedMemorySize(pageCount * pageSize);
 
-	// compacted clusters range
-	constexpr vk::DeviceSize compactedClustersSize = (2048 * sizeof(uint16_t)); // tile can have max 255 unique clusters + number of clusters
-	constexpr vk::DeviceSize compactedRangeSize = compactedClustersSize * 1024 + sizeof(uint16_t); // + cluster index counter
-	mUniqueClustersOffset = mPagePoolOffset + pagePoolSize;
-	mUniqueClustersSize = compactedRangeSize;
+	// compacted unique clusters 
+	mUniqueClustersOffset = mPagePoolOffset + mPagePoolSize;
+	mUniqueClustersSize = alignedMemorySize(4096 * sizeof(uint32_t)); // default value, every scene should tweak this value
 
 	// allocate buffer
-	constexpr vk::DeviceSize bufferSize = pageTableSize + pagePoolSize + compactedRangeSize;
-
 	mClusteredBuffer = mUtility.createBuffer(
-		bufferSize,
+		mPageTableSize + mPagePoolSize + mUniqueClustersSize,
 		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndirectBuffer,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
@@ -1066,25 +1002,21 @@ void Renderer::createClusteredBuffers()
 
 void Renderer::createLights()
 {
-	constexpr vk::DeviceSize pointLightsSize = sizeof(PointLight) * MAX_LIGHTS;
-	constexpr vk::DeviceSize indirectionSize = MAX_LIGHTS * 20; // every sceen need to tweak this value
-	constexpr vk::DeviceSize lightsOutSize = indirectionSize;
-	constexpr vk::DeviceSize splittersSize = 1024 * sizeof(uint32_t) * 2; // todo remove in final prob
+	mPointLightsSize = sizeof(PointLight) * MAX_LIGHTS;
+	mLightsOutSwap = MAX_LIGHTS * 20; // every sceene need to tweak this value
+	mLightsOutSize = mLightsOutSwap;
+	mSplittersSize = 1024 * sizeof(uint32_t) * 2; // todo remove in final prob
+
 	mLightsOutOffset = 0;
-	mPointLightsOffset = lightsOutSize;
-	mLightsIndirectionOffset = mPointLightsOffset + pointLightsSize;
-	mSplittersOffset = mLightsIndirectionOffset + indirectionSize;
+	mPointLightsOffset = mLightsOutSize;
+	mLightsOutSwapOffset = mPointLightsOffset + mPointLightsSize;
+	mSplittersOffset = mLightsOutSwapOffset + mLightsOutSwap;
 
-	mLightsOutSize = lightsOutSize;
-	mPointLightsSize = pointLightsSize;
-	mLightsIndirectionSize = indirectionSize;
-	mSplittersSize = splittersSize;
-
-	constexpr vk::DeviceSize bufferSize = pointLightsSize + lightsOutSize + indirectionSize + splittersSize;
+	vk::DeviceSize bufferSize = mPointLightsSize + mLightsOutSize + mLightsOutSwap + mSplittersSize;
 
 	// allocate buffer
 	mPointLightsStagingBuffer = mUtility.createBuffer(
-		pointLightsSize,
+		mPointLightsSize,
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
@@ -1167,8 +1099,8 @@ void Renderer::createDescriptorSets()
 
 	vk::DescriptorBufferInfo lightsIndirectionInfo;
 	lightsIndirectionInfo.buffer = *mLightsBuffers.handle;
-	lightsIndirectionInfo.offset = mLightsIndirectionOffset;
-	lightsIndirectionInfo.range = mLightsIndirectionSize;
+	lightsIndirectionInfo.offset = mLightsOutSwapOffset;
+	lightsIndirectionInfo.range = mLightsOutSwap;
 
 	vk::DescriptorBufferInfo pageTableInfo;
 	pageTableInfo.buffer = *mClusteredBuffer.handle;
@@ -1310,35 +1242,30 @@ void Renderer::createGraphicsCommandBuffers()
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 
-		cmd.begin(beginInfo);
-
-		vk::RenderPassBeginInfo renderpassInfo;
-		renderpassInfo.renderPass = *mGBufferRenderpass;
-		renderpassInfo.framebuffer = *mGBufferFramebuffer;
-		renderpassInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
-		renderpassInfo.renderArea.extent = mSwapchainExtent;
-
 		std::array<vk::ClearValue, 4> clearValues;
 		clearValues[0].color.setFloat32({ 0.0f, 0.0f, 0.0f, 0.0f });
 		clearValues[1].color.setFloat32({ 1.0f, 0.8f, 0.4f, 1.0f });
 		clearValues[2].color.setFloat32({ 0.0f, 0.0f, 0.0f, 0.0f });
 		clearValues[3].depthStencil.setDepth(1.0f).setStencil(0.0f);
 
+		vk::RenderPassBeginInfo renderpassInfo;
+		renderpassInfo.renderPass = *mGBufferRenderpass;
+		renderpassInfo.framebuffer = *mGBufferFramebuffer;
+		renderpassInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
+		renderpassInfo.renderArea.extent = mSwapchainExtent;
 		renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 		renderpassInfo.pClearValues = clearValues.data();
-
-		cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
-
-		//PushConstantObject pco = {};
-		//cmdBuffer.pushConstants(mResource.pipelineLayout.get("composite"), vk::ShaderStageFlagBits::eFragment, 0, sizeof(pco), &pco);
-		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("gbuffers"));
 
 		std::array<vk::DescriptorSet, 2> descriptorSets = {
 			mResource.descriptorSet.get("camera"),
 			mResource.descriptorSet.get("model")
 		};
-		auto pipelineLayout = mResource.pipelineLayout.get("gbuffers");
 
+		auto pipelineLayout = mResource.pipelineLayout.get("gbuffers");
+		
+		cmd.begin(beginInfo);
+		cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
+		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("gbuffers"));
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSets, nullptr);
 
 		for (const auto& part : mModel.getMeshParts())
@@ -1366,31 +1293,6 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.commandPool = mContext.getDynamicCommandPool();
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		mPrimaryCompositionCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
-
-		vk::CommandBufferInheritanceInfo inheritanceInfo;
-		inheritanceInfo.renderPass = *mCompositionRenderpass;
-		inheritanceInfo.subpass = 0;
-
-		vk::CommandBufferBeginInfo beginInfo;
-		beginInfo.flags = vk::CommandBufferUsageFlagBits::eRenderPassContinue;
-		beginInfo.pInheritanceInfo = &inheritanceInfo;
-
-		// // record command buffers
-		// for (auto& cmd : mCompositionCommandBuffers)
-		// {
-		// 	cmd->begin(beginInfo);
-		// 	cmd->bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("composition"));
-		//
-		// 	std::array<vk::DescriptorSet, 2> descriptorSets = {
-		// 		mResource.descriptorSet.get("camera"),
-		// 		mResource.descriptorSet.get("composition")
-		// 	};
-		//
-		// 	cmd->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("composition"), 0, descriptorSets, nullptr);
-		// 	cmd->draw(4, 1, 0, 0);
-		//
-		// 	cmd->end();
-		// }
 	}
 
 	// debug
@@ -1616,30 +1518,11 @@ void Renderer::createComputeCommandBuffer()
 				cmd.dispatchIndirect(*mClusteredBuffer.handle, mPageTableOffset);
 			cmd.end();
 		}
-
-		{
-			auto &cmd = *mSecondaryLightCullingCommandBuffers[1];
-			cmd.begin(beginInfo);
-				
-
-
-			cmd.end();
-		}
 	}
 }
 
 void Renderer::updateUniformBuffers()
 {
-
-	// // update model
-	// {
-	// 	auto data = reinterpret_cast<ObjectUBO*>(mContext.getDevice().mapMemory(*mObjectStagingBuffer.memory, 0, sizeof(ObjectUBO)));
-	// 	data->model = glm::mat4();
-	//
-	// 	mContext.getDevice().unmapMemory(*mObjectStagingBuffer.memory);
-	// 	mUtility.copyBuffer(*mObjectStagingBuffer.handle, *mObjectUniformBuffer.handle, sizeof(ObjectUBO));
-	// }
-
 	// update debug buffer, if dirty bit is set
 	if (BaseApp::getInstance().getUI().debugStateUniformNeedsUpdate())
 	{
@@ -1679,7 +1562,6 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	submitInfo.pSignalSemaphores = &*mLightCopyFinishedSemaphore;
 
 	mContext.getComputeQueue().submit(1, &submitInfo, nullptr);
-	lightsUpdate = true;
 }
 
 void Renderer::drawFrame()
@@ -1867,7 +1749,7 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 	// light culling
 	{
 		uint32_t data = 0;
-		auto buffer = (mLightBufferSwapUsed == "lightculling_01") ? mLightsOutOffset : mLightsIndirectionOffset; // TODO rewrite this shit
+		auto buffer = (mLightBufferSwapUsed == "lightculling_01") ? mLightsOutOffset : mLightsOutSwapOffset;
 	
 		vk::BufferMemoryBarrier before;
 		before.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
@@ -1880,16 +1762,14 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		after.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead;
 	
-		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, nullptr, before, nullptr);
 		cmd.updateBuffer(*mLightsBuffers.handle, buffer, 4, &data);
 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eDrawIndirect, vk::DependencyFlagBits::eByRegion, nullptr, after, nullptr);
 		
 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("lightculling"));
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 0, descriptorSets, nullptr);
-		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 0, 4, &maxLevel);
-		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 4, levelParam.size() * 8, levelParam.data());
+		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 0, 4, &mMaxLevel);
+		cmd.pushConstants(mResource.pipelineLayout.get("lightculling"), vk::ShaderStageFlagBits::eCompute, 4, mLevelParam.size() * 8, mLevelParam.data());
 		cmd.dispatchIndirect(*mClusteredBuffer.handle, mUniqueClustersOffset + 4);
-		// cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
 	}
 
 	cmd.end();
@@ -1918,13 +1798,22 @@ mResource.descriptorSet.get("camera"),
 mResource.descriptorSet.get("lightculling_01")
 	};
 
-	vk::MemoryBarrier barrier;
-	barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-	barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+	auto barrier = [](vk::CommandBuffer cmd)
+	{
+		vk::MemoryBarrier barrier;
+		barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+		
+		cmd.pipelineBarrier(
+			vk::PipelineStageFlagBits::eComputeShader, 
+			vk::PipelineStageFlagBits::eComputeShader, 
+			vk::DependencyFlagBits::eByRegion, 
+			barrier, nullptr, nullptr
+		);
+	};
 
-	std::array<uint32_t, 30> pcLeaves;
-	levelParam.reserve(6);
-	levelParam.clear();
+	mLevelParam.reserve(6);
+	mLevelParam.clear();
 
 	mLightBufferSwapUsed = "lightculling_01";
 
@@ -1938,7 +1827,13 @@ mResource.descriptorSet.get("lightculling_01")
 		barrier.offset = mPointLightsOffset;
 		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
+
+		cmd.pipelineBarrier(
+			vk::PipelineStageFlagBits::eTransfer, 
+			vk::PipelineStageFlagBits::eComputeShader, 
+			vk::DependencyFlagBits::eByRegion, 
+			nullptr, barrier, nullptr
+		);
 	}
 
 	// light sorting
@@ -1949,8 +1844,6 @@ mResource.descriptorSet.get("lightculling_01")
 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_bitonic"));
 		cmd.pushConstants(mResource.pipelineLayout.get("sort_bitonic"), vk::ShaderStageFlagBits::eCompute, 0, 4, &mLightsCount);
 		cmd.dispatch(lightWindowsCount, 1, 1);
-
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
 		
 		if (mLightsCount > 128)
 		{
@@ -1959,14 +1852,11 @@ mResource.descriptorSet.get("lightculling_01")
 			for (size_t i = 0; mLightsCount > (128u << i); i++)
 			{
 				size_t mergeCount = (mLightsCount - 1) / ((256 / mSubGroupSize) * (256 << i)) + 1; // every warp merges 256^i items
-				pcLeaves[i] = i + 1;
+				uint32_t pc = i + 1;
 			
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
-				cmd.pushConstants(mResource.pipelineLayout.get("sort_mergeBitonic"), vk::ShaderStageFlagBits::eCompute, 0, 4, &mLightsCount);
-				cmd.pushConstants(mResource.pipelineLayout.get("sort_mergeBitonic"), vk::ShaderStageFlagBits::eCompute, 4, 4, &pcLeaves[i]);
-
-				// first time barrier is not neede - async splitters
-				if (i >= 0)	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+				cmd.pushConstants(mResource.pipelineLayout.get("sort_mergeBitonic"), vk::ShaderStageFlagBits::eCompute, 4, 4, &pc);
+				barrier(cmd);
 				cmd.dispatch(mergeCount, 1, 1);
 				
 				mLightBufferSwapUsed = (mLightBufferSwapUsed == "lightculling_01") ? "lightculling_10" : "lightculling_01";
@@ -1980,8 +1870,8 @@ mResource.descriptorSet.get("lightculling_01")
 	// BVH
 	{
 		auto& layout = mResource.pipelineLayout.get("bvh");
-		levelParam.emplace_back(mLightsCount, 0);
 		const uint32_t subgroupAlignedLightCount = ((mLightsCount - 1) / mSubGroupSize + 1) * mSubGroupSize - 1;
+		mMaxLevel = (mLightsCount > mSubGroupSize) ? 1 : 0;
 
 		struct
 		{
@@ -1996,33 +1886,25 @@ mResource.descriptorSet.get("lightculling_01")
 		
 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("bvh"));
 		cmd.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+		barrier(cmd);
 		cmd.dispatch((mLightsCount - 1) / 512 + 1, 1, 1);
 
-		maxLevel = (mLightsCount > mSubGroupSize) ? 1 : 0;
-		levelParam.emplace_back((mLightsCount - 1) / mSubGroupSize + 1, pc.nextOffset);
+		mLevelParam.emplace_back(mLightsCount, 0);
+		mLevelParam.emplace_back((mLightsCount - 1) / mSubGroupSize + 1, pc.nextOffset);
 		
-		while (levelParam.back().first > mSubGroupSize)
+		for ( ;mLevelParam.back().first > mSubGroupSize; mMaxLevel++)
 		{
-			glm::uint32 newCount = (levelParam.back().first - 1) / mSubGroupSize + 1;
-			pc = {
-				levelParam.back().first,
-				pc.nextOffset,
-				pc.nextOffset + levelParam.back().first
-			};
-
-			levelParam.emplace_back(newCount, pc.nextOffset);
-			maxLevel++;
-			
+			pc = {mLevelParam.back().first, pc.nextOffset, pc.nextOffset + mLevelParam.back().first };
+						
 			cmd.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pc), &pc);
-			cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
+			barrier(cmd);
 			cmd.dispatch((pc.count - 1) / 512 + 1, 1, 1);
+			
+			mLevelParam.emplace_back((mLevelParam.back().first - 1) / mSubGroupSize + 1, pc.nextOffset);
 		}
 	}
 
 	cmd.end();
-
-	// vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eComputeShader; // todo mb bottom
 
 	vk::SubmitInfo submitInfo;
 	submitInfo.commandBufferCount = 1;

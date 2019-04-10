@@ -26,8 +26,6 @@ private:
 
 	bool mDestroy = false;
 	bool mFinished = false;
-
-	// std::deque<std::function<void()>> mWorkQueue; // todo mby
 };
 
 class ThreadPool
