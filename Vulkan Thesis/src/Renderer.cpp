@@ -1684,10 +1684,6 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 
 void Renderer::drawFrame()
 {
-	// // wait for fences
-	// mContext.getDevice().waitForFences({ *mFences[mCurrentFrame] }, true, std::numeric_limits<uint64_t>::max());
-	// mContext.getDevice().resetFences({ *mFences[mCurrentFrame] });
-
 	// Acquire an image from the swap chain
 	uint32_t imageIndex;
 	{
@@ -1716,7 +1712,7 @@ void Renderer::drawFrame()
 
 		vk::SubmitInfo submitInfo;
 		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &*mImageAvailableSemaphore[mCurrentFrame];
+		submitInfo.pWaitSemaphores = &*mImageAvailableSemaphore[imageIndex];
 		submitInfo.pWaitDstStageMask = &waitStages;
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &*mGBufferCommandBuffer;
@@ -1726,6 +1722,8 @@ void Renderer::drawFrame()
 		// submitInfos.emplace_back(submitInfo);
 		mContext.getGeneralQueue().submit(submitInfo, nullptr);
 	}
+
+	auto cmdUI = BaseApp::getInstance().getUI().recordCommandBuffer(imageIndex);
 
 	if (BaseApp::getInstance().getUI().getDebugIndex() == DebugStates::disabled)
 	{
@@ -1760,9 +1758,8 @@ void Renderer::drawFrame()
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("composition"), 0, descriptorSets, nullptr);
 			cmd.draw(4, 1, 0, 0);
 
-			// cmd.executeCommands(1, &*mCompositionCommandBuffers[imageIndex]);
 			cmd.nextSubpass(vk::SubpassContents::eSecondaryCommandBuffers);
-			cmd.executeCommands(1, &*BaseApp::getInstance().getUI().getCommandBuffer());
+			cmd.executeCommands(1, &cmdUI);
 			cmd.endRenderPass();
 			cmd.end();
 		}
@@ -1778,7 +1775,7 @@ void Renderer::drawFrame()
 			submitInfo.commandBufferCount = 1;
 			submitInfo.pCommandBuffers = &*mPrimaryCompositionCommandBuffers[imageIndex];
 			submitInfo.signalSemaphoreCount = 1;
-			submitInfo.pSignalSemaphores = &*mRenderFinishedSemaphore[mCurrentFrame];
+			submitInfo.pSignalSemaphores = &*mRenderFinishedSemaphore[imageIndex];
 
 			submitInfos.emplace_back(submitInfo);
 		}
@@ -1805,7 +1802,7 @@ void Renderer::drawFrame()
 			cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
 			cmd.executeCommands(1, &*mDebugCommandBuffers[imageIndex]);
 			cmd.nextSubpass(vk::SubpassContents::eSecondaryCommandBuffers);
-			cmd.executeCommands(1, &*BaseApp::getInstance().getUI().getCommandBuffer());
+			cmd.executeCommands(1, &cmdUI);
 			cmd.endRenderPass();
 			cmd.end();
 		}
@@ -1819,7 +1816,7 @@ void Renderer::drawFrame()
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &*mPrimaryDebugCommandBuffers[imageIndex];
 		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &*mRenderFinishedSemaphore[mCurrentFrame];
+		submitInfo.pSignalSemaphores = &*mRenderFinishedSemaphore[imageIndex];
 
 		submitInfos.emplace_back(submitInfo);
 	}
@@ -1830,7 +1827,7 @@ void Renderer::drawFrame()
 	{
 		vk::PresentInfoKHR presentInfo;
 		presentInfo.waitSemaphoreCount = 1;
-		presentInfo.pWaitSemaphores = &*mRenderFinishedSemaphore[mCurrentFrame];
+		presentInfo.pWaitSemaphores = &*mRenderFinishedSemaphore[imageIndex];
 		presentInfo.swapchainCount = 1;
 		presentInfo.pSwapchains = &*mSwapchain;
 		presentInfo.pImageIndices = &imageIndex;

@@ -16,29 +16,6 @@ UI::UI(GLFWwindow* window, Renderer& renderer)
 	createPipeline();
 }
 
-void UI::onKeyPress(int key, int action)
-{
-	// if (action == GLFW_PRESS)
-	// {
-	// 	switch (key)
-	// 	{
-	// 		// todo use a hash map or something
-	// 	case GLFW_KEY_PAGE_UP:
-	// 		++mDebugIndex;
-	// 		mDebugUniformDirtyBit = true;
-	// 		break;
-	// 	case GLFW_KEY_PAGE_DOWN:
-	// 		--mDebugIndex;
-	// 		mDebugUniformDirtyBit = true;
-	// 		break;
-	//
-	// 	case GLFW_KEY_ENTER:
-	// 		BaseApp::getInstance().getRenderer().reloadShaders();
-	// 		break;
-	// 	}
-	// }
-}
-
 DebugStates UI::getDebugIndex() const
 {
 	return mContext.debugState;
@@ -81,11 +58,10 @@ void UI::update()
 
 		if (TreeNode("Tile settings"))
 		{
-			constexpr int maxLights = 500'000; // todo refarctor this
-			DragInt("Number of lights", &mContext.lightsCount, 10, 1, maxLights);
+			DragInt("Number of lights", &mContext.lightsCount, 10, 1, MAX_LIGHTS);
 
 			// v_max doesn't work properly, make sure it doesn't exceed
-			if (mContext.lightsCount > maxLights) mContext.lightsCount = maxLights;
+			if (mContext.lightsCount > MAX_LIGHTS) mContext.lightsCount = MAX_LIGHTS;
 
 			const char* options[] = { "16x16", "32x32", "64x64" };
 			if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
@@ -114,7 +90,6 @@ void UI::copyDrawData(vk::CommandBuffer& cmd)
 {
 	auto drawData = ImGui::GetDrawData();
 
-	// todo check total idx/vertex data count
 	auto vertexData = reinterpret_cast<ImDrawVert*>(mRenderer.mContext.getDevice().mapMemory(*mStagingBuffer.memory, 0, mStagingBuffer.size, {}));
 	auto indexData = reinterpret_cast<ImDrawIdx*>(vertexData);
 	
@@ -137,9 +112,9 @@ void UI::copyDrawData(vk::CommandBuffer& cmd)
 	mRenderer.mContext.getDevice().unmapMemory(*mStagingBuffer.memory);
 }
 
-void UI::recordCommandBuffer()
+vk::CommandBuffer UI::recordCommandBuffer(size_t cmdIndex)
 {
-	auto& cmd = *mCmdBuffers[mCommandBufferInUse];
+	auto& cmd = *mCmdBuffers[cmdIndex];
 	auto& context = BaseApp::getInstance().getRenderer().mContext;
 	const auto drawData = ImGui::GetDrawData();
 
@@ -195,13 +170,8 @@ void UI::recordCommandBuffer()
 	}
 
 	cmd.end();
-}
 
-vk::UniqueCommandBuffer& UI::getCommandBuffer()
-{
-	auto& ret = mCmdBuffers[mCommandBufferInUse];
-	mCommandBufferInUse = (mCommandBufferInUse + 1) % 2; //todo mod swapchain img count
-	return ret;
+	return cmd;
 }
 
 BufferParameters& UI::getVertexBuffer()
@@ -260,7 +230,7 @@ void UI::initResources()
 	vk::CommandBufferAllocateInfo cmdAllocInfo;
 	cmdAllocInfo.commandPool = mRenderer.mContext.getDynamicCommandPool();
 	cmdAllocInfo.level = vk::CommandBufferLevel::eSecondary;
-	cmdAllocInfo.commandBufferCount = 2; // todo find out swapchain img count
+	cmdAllocInfo.commandBufferCount = 2;
 
 	mCmdBuffers = mRenderer.mContext.getDevice().allocateCommandBuffersUnique(cmdAllocInfo);
 

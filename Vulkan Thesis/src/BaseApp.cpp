@@ -49,7 +49,6 @@ void BaseApp::run()
 		
 		mUI.update();
 		ImGui::Render();
-		mUI.recordCommandBuffer();
 
 		if (mUI.mContext.shaderReloadDirtyBit)
 		{

@@ -121,12 +121,11 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	if (!shader.preprocess(&defaultTBuiltInResource, 110, ENoProfile, false, false, messages, &preprocessedGLSL, includer))
 	{
 		std::string log = "Failed to preprocess file: " + filename + "\n";
-		log += shader.getInfoLog();		//TODO make LOGGER
+		log += shader.getInfoLog();	
 		log += shader.getInfoDebugLog();
 
 		throw std::runtime_error(log);
 	}
-	// TODO LOG
 
 	const char* preprocessedCstr = preprocessedGLSL.c_str();
 	shader.setStrings(&preprocessedCstr, 1);
@@ -134,7 +133,7 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	if (!shader.parse(&defaultTBuiltInResource, 110, false, messages))
 	{
 		std::string log = "Failed to parse file: " + filename + "\n";
-		log += shader.getInfoLog();		//TODO make LOGGER
+		log += shader.getInfoLog();
 		log += shader.getInfoDebugLog();
 
 		throw std::runtime_error(log);
@@ -145,7 +144,7 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 
 	if (!program.link(messages))
 	{
-		std::cout << program.getInfoLog() << std::endl;		//TODO make LOGGER
+		std::cout << program.getInfoLog() << std::endl;
 		std::cout << program.getInfoDebugLog() << std::endl;
 
 		throw std::runtime_error("Failed to link program: " + filename);
@@ -177,23 +176,10 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	
 	spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
 	optimizer.SetMessageConsumer(msger);
-	// optimizer.RegisterPerformancePasses();
-	// optimizer.RegisterPass(spvtools::CreateLoopUnrollPass(true));
-	// optimizer.RegisterLegalizationPasses();
+	optimizer.RegisterPerformancePasses();
 	
 	if (!optimizer.Run(spirV.data(), spirV.size(), &spirV))
-	{
-		// throw std::runtime_error("Failed to optimize SpirV program: " + filename);
-		//TODO log about failure
-		std::cout << "Failed to optimize SpirV program: " + filename;
-	}
-	
-	
-	// std::ofstream outFile(filename + ".spv"); // TODO make spv folder or smth
-	// spv::Disassemble(outFile, spirV);
-	
-	// if (filename == "data/bvh_merge.comp")
-	// 	spv::Disassemble(std::cout, spirV);
+		throw std::runtime_error("Failed to optimize SpirV program: " + filename);
 	
 	return spirV;
 }

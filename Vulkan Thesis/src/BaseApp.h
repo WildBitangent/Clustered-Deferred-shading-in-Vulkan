@@ -58,7 +58,8 @@ private:
 
 private:
 	Camera mCamera;
-	std::vector<PointLight> mLights; // TODO prob move this somewhere else
+
+	std::vector<PointLight> mLights;
 	std::vector<glm::vec3> mLightsDirections;
 	std::vector<float> mSpeeds;
 

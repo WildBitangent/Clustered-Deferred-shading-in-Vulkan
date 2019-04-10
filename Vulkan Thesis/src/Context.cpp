@@ -144,7 +144,7 @@ QueueFamilyIndices QueueFamilyIndices::findQueueFamilies(vk::PhysicalDevice devi
 
 	// try to find queue for compute, graphics and present - standard says that there should be 1 universal queue on every device
 	auto flag = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute;
-	for (int i = 0; i < static_cast<int>(queueFamilies.size()) && indices.generalFamily < 0; i++) // todo rewrite this
+	for (int i = 0; i < static_cast<int>(queueFamilies.size()) && indices.generalFamily < 0; i++)
 		if (queueFamilies[i].queueFlags & flag && device.getSurfaceSupportKHR(static_cast<uint32_t>(i), surface))
 			indices.generalFamily = i;
 
@@ -267,8 +267,7 @@ void Context::setupDebugCallback()
 	createInfo.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
 	createInfo.pfnUserCallback = debugCallback;
 
-	// static auto dldi = vk::DispatchLoaderDynamic(*mInstance); //TODO ain't nobody got time for that
-	static auto dldi = vk::DispatchLoaderDynamic(*mInstance, reinterpret_cast<PFN_vkGetInstanceProcAddr>(mInstance->getProcAddr("vkGetInstanceProcAddr"))); //TODO ain't nobody got time for that
+	static auto dldi = vk::DispatchLoaderDynamic(*mInstance, reinterpret_cast<PFN_vkGetInstanceProcAddr>(mInstance->getProcAddr("vkGetInstanceProcAddr")));
 
 	mMessenger = mInstance->createDebugUtilsMessengerEXTUnique(createInfo, nullptr, dldi);
 #endif

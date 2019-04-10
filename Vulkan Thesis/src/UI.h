@@ -17,20 +17,6 @@ enum class DebugStates : unsigned
 	count
 };
 
-inline DebugStates& operator++(DebugStates& s) 
-{
-	using type = std::underlying_type<DebugStates>::type;
-	s = static_cast<DebugStates>((static_cast<type>(s) + 1) % static_cast<type>(DebugStates::count));
-	return s;
-}
-
-inline DebugStates& operator--(DebugStates& s)
-{
-	using type = std::underlying_type<DebugStates>::type; // TODO correct it
-	s = static_cast<DebugStates>((static_cast<type>(s) - 1) % static_cast<type>(DebugStates::count));
-	return s;
-}
-
 class UI
 {
 public:
@@ -51,17 +37,14 @@ public:
 public:
 	UI(GLFWwindow* window, Renderer& renderer);
 
-	void onKeyPress(int key, int action);
 	DebugStates getDebugIndex() const;
 	bool debugStateUniformNeedsUpdate();
 
 	void update();
 	void resize();
 	void copyDrawData(vk::CommandBuffer& cmd);
-	void recordCommandBuffer();
-	vk::UniqueCommandBuffer& getCommandBuffer();
+	vk::CommandBuffer recordCommandBuffer(size_t cmdIndex);
 
-public:
 	BufferParameters& getVertexBuffer();
 	BufferParameters& getIndexBuffer();
 
@@ -81,5 +64,4 @@ private:
 	vk::UniqueSampler mSampler;
 
 	std::vector<vk::UniqueCommandBuffer> mCmdBuffers;
-	size_t mCommandBufferInUse = 0;
 };
