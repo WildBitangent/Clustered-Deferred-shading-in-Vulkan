@@ -21,12 +21,11 @@ layout(set = 0, binding = 0) uniform CameraUBO
 	mat4 proj;
 	mat4 invProj;
 	vec3 position;
+	uvec2 screenSize;
 } camera;
 
 layout(std430, set = 1, binding = 0) buffer readonly PointLights
 {
-	uvec3 lightCount_screenSize;
-	uint pad;
 	Light lights[];
 } pointLights;
 
@@ -95,7 +94,6 @@ float getViewDepth(float projDepth)
 	return camera.proj[3][2] / (normalizedProjDepth + camera.proj[2][2]);
 }
 
-
 void main() 
 {
 	// Get G-Buffer values
@@ -109,13 +107,14 @@ void main()
 	uvec3 key = uvec3(uvec2(gl_FragCoord.xy) / uvec2(TILE_SIZE, TILE_SIZE), k);
 	uint address = addressTranslate(packKey(key));
 	uint index = pool.data[address];
+	
 	// Ambient part
 	#define ambient 0.03
 	// #define ambient 0.2
+
 	vec3 fragcolor = albedo.rgb * ambient;
 
 	uint indirectCount = lightsOut.data[index];
-
 	for (uint ii = 0; ii < indirectCount; ii++)
 	{
 		uint stop = (ii == indirectCount - 1) ? lightsOut.data[index + 1] : 192;
@@ -126,7 +125,6 @@ void main()
 			uint lightIndex = lightsOut.data[offset + i];
 
 			Light light = pointLights.lights[lightIndex];
-			// light.position = (camera.view * vec4(light.position, 1.0)).xyz;
 
 			vec3 L = light.position - fragPos;
 			vec3 V = normalize(-fragPos);
@@ -147,31 +145,6 @@ void main()
 			fragcolor += specular + diff;
 		}
 	}
-
-	// for (uint i = 0; i < lightsOut.data[index]; i++)
-	// {
-	// 	uint lightIndex = lightsOut.data[index + i + 1];
-
-	// 	Light light = pointLights.lights[lightIndex];
-
-	// 	vec3 L = light.position - fragPos;
-	// 	vec3 V = normalize(-fragPos);
-	// 	vec3 N = normalize(normal);
-
-	// 	// Attenuation
-	// 	float atten = clamp(1.0 - pow(length(L), 2.0) / pow(light.radius, 2.0), 0.0, 1.0);
-	// 	L = normalize(L);
-
-	// 	// Diffuse part
-	// 	vec3 diff = albedo.rgb * max(0.0, dot(N, L)) * atten * light.intensity;
-
-	// 	// Specular part
-	// 	vec3 R = reflect(-L, N);
-	// 	float spec = max(0.0, dot(R, V));
-	// 	vec3 specular = vec3(specStrength * pow(spec, 16.0)) * atten * light.intensity;
-
-	// 	fragcolor += specular + diff;
-	// }
 
  	outFragcolor = vec4(fragcolor, 1.0);	
 }

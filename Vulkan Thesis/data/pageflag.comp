@@ -26,6 +26,7 @@ layout(set = 0, binding = 0) uniform CameraUBO
 	mat4 proj;
 	mat4 invProj;
 	vec3 position;
+	uvec2 screenSize;
 } camera;
 
 layout(set = 1, binding = 3) uniform sampler2D samplerDepth;
@@ -38,12 +39,6 @@ layout(std430, set = 1, binding = 4) buffer writeonly PageTable
 
 	uint nodes[];
 } table;
-layout(std430, set = 1, binding = 0) buffer readonly LightsIn
-{
-	uvec3 lightCount_screenSize;
-	uint pad;
-	Light lightsIn[];
-};
 
 uint packKey(uvec3 key)
 {
@@ -62,7 +57,7 @@ void main()
 {
 	if (TILE_SIZE <= 32)
 	{
-		if (gl_GlobalInvocationID.x >= lightCount_screenSize.y || gl_GlobalInvocationID.y >= lightCount_screenSize.z)
+		if (gl_GlobalInvocationID.x >= camera.screenSize.x || gl_GlobalInvocationID.y >= camera.screenSize.y)
 			return;
 
 		uvec2 tileID = gl_WorkGroupID.xy;
@@ -82,7 +77,7 @@ void main()
 			for (int y = 0; y < iter; y++)
 			{
 				ivec2 dimension = ivec2((gl_WorkGroupID * iter + ivec3(x, y, 0)) * 32 + gl_LocalInvocationID);
-				if (dimension.x >= lightCount_screenSize.y || dimension.y >= lightCount_screenSize.z)
+				if (dimension.x >= camera.screenSize.x || dimension.y >= camera.screenSize.y)
 					continue;
 
 				float depth = getViewDepth(texelFetch(samplerDepth, dimension, 0).r);

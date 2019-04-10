@@ -14,8 +14,6 @@
 
 layout(std430, set = 1, binding = 0) buffer readonly LightsIn
 {
-	uvec3 lightCount_screenSize;
-	uint pad;
 	Light lightsIn[];
 };
 

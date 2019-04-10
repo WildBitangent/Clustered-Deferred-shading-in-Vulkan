@@ -21,6 +21,7 @@ struct CameraUBO
 	glm::mat4 projection;
 	glm::mat4 invProj;
 	glm::vec3 cameraPosition;
+	alignas(16) glm::uvec2 screenSize;
 };
 
 struct ObjectUBO
@@ -31,12 +32,6 @@ struct ObjectUBO
 struct DebugUBO
 {
 	uint32_t debugState = 0;
-};
-
-struct LightParams // used with size of glm::vec4
-{
-	uint32_t lightsCount;
-	glm::uvec2 screenSize;
 };
 
 Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
@@ -101,6 +96,7 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down TODO extension viewport -1
 		data->invProj = glm::inverse(data->projection);
 		data->cameraPosition = campos;
+		data->screenSize = {mSwapchainExtent.width, mSwapchainExtent.height};
 
 		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
 
@@ -1508,7 +1504,7 @@ void Renderer::createComputePipeline()
 	}
 
 	auto pipelineBase = mResource.pipeline.get("pageflag");
-	for (const auto& name : { "pagealloc", "pagestore", "pagecompact", "sort_bitonic"/*, "sort_splitters"*/ })
+	for (const auto& name : { "pagealloc", "pagestore", "pagecompact" }) // todo remove unused pipelines
 	{
 		stageInfo.module = mResource.shaderModule.add(std::string("data/" ) + name + ".comp");
 
@@ -1523,49 +1519,28 @@ void Renderer::createComputePipeline()
 	// merge bitonic (push constants needed)
 	vk::PushConstantRange pushConstantRange;
 	pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eCompute;
-	pushConstantRange.size = sizeof(uint32_t);
 	
 	layoutInfo.pPushConstantRanges = &pushConstantRange;
 	layoutInfo.pushConstantRangeCount = 1;
-	mResource.pipelineLayout.add("bitonic_merge", layoutInfo);
-	{
-		stageInfo.module = mResource.shaderModule.add(std::string("data/sort_mergeBitonic.comp"));
-	
-		vk::ComputePipelineCreateInfo pipelineInfo;
-		pipelineInfo.stage = stageInfo;
-		pipelineInfo.layout = mResource.pipelineLayout.get("bitonic_merge");
-		pipelineInfo.basePipelineHandle = pipelineBase;
-	
-		mResource.pipeline.add("sort_mergeBitonic", *mPipelineCache, pipelineInfo);
-	}
 
-	// lightculling
-	pushConstantRange.size = 11 * sizeof(uint32_t);	
-	mResource.pipelineLayout.add("lightculling", layoutInfo);
+	auto createPipeline = [&](const std::string name, const size_t pcSize)
 	{
-		stageInfo.module = mResource.shaderModule.add(std::string("data/lightculling.comp"));
-	
+		pushConstantRange.size = pcSize;
+		auto layout = mResource.pipelineLayout.add(name, layoutInfo);
+		stageInfo.module = mResource.shaderModule.add(std::string("data/" ) + name + ".comp");
+		
 		vk::ComputePipelineCreateInfo pipelineInfo;
 		pipelineInfo.stage = stageInfo;
-		pipelineInfo.layout = mResource.pipelineLayout.get("lightculling");
+		pipelineInfo.layout = layout;
 		pipelineInfo.basePipelineHandle = pipelineBase;
 	
-		mResource.pipeline.add("lightculling", *mPipelineCache, pipelineInfo);
-	}
+		mResource.pipeline.add(name, *mPipelineCache, pipelineInfo);
+	};
 
-	// bvh
-	pushConstantRange.size = 3 * sizeof(uint32_t);
-	mResource.pipelineLayout.add("bvh", layoutInfo);
-	{
-		stageInfo.module = mResource.shaderModule.add(std::string("data/bvh.comp"));
-	
-		vk::ComputePipelineCreateInfo pipelineInfo;
-		pipelineInfo.stage = stageInfo;
-		pipelineInfo.layout = mResource.pipelineLayout.get("bvh");
-		pipelineInfo.basePipelineHandle = pipelineBase;
-	
-		mResource.pipeline.add("bvh", *mPipelineCache, pipelineInfo);
-	}
+	createPipeline("sort_bitonic", sizeof(uint32_t));
+	createPipeline("sort_mergeBitonic", 2 * sizeof(uint32_t));
+	createPipeline("bvh", 3 * sizeof(uint32_t));
+	createPipeline("lightculling", 11 * sizeof(uint32_t));
 }
 
 void Renderer::createComputeCommandBuffer()
@@ -1685,20 +1660,10 @@ void Renderer::updateUniformBuffers()
 void Renderer::updateLights(const std::vector<PointLight>& lights)
 {	
 	mLightsCount = BaseApp::getInstance().getUI().mContext.lightsCount;
-	auto memorySize = sizeof(PointLight) * mLightsCount + sizeof(glm::vec4);
-	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize + 8192));
+	auto memorySize = sizeof(PointLight) * mLightsCount;
 
-	// mContext.getDevice().waitForFences(1, &*mLightCopyFence, true, std::numeric_limits<uint64_t>::max());
-	// mContext.getDevice().resetFences(1, &*mLightCopyFence);
-
-	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {mSwapchainExtent.width, mSwapchainExtent.height} };
-	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
-
-	std::uniform_int_distribution<uint32_t> distribution(0, mLightsCount - 1);
-	static std::minstd_rand generator(reinterpret_cast<unsigned>(&distribution));
-	for (size_t i = 0; i < 1024; i++)
-		reinterpret_cast<uint32_t*>(lightBuffer + memorySize)[i * 2 + 1] = distribution(generator);
-
+	auto data = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize));
+	memcpy(data, lights.data(), memorySize);
 	mContext.getDevice().unmapMemory(*mPointLightsStagingBuffer.memory);
 		
 	vk::CommandBufferBeginInfo beginInfo;
@@ -1706,8 +1671,6 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 
 	mLightCopyCommandBuffer->begin(beginInfo);
 	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset);
-	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, sizeof(glm::vec4), 0, mLightsIndirectionOffset);
-	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, 8192, memorySize, mSplittersOffset);
 	mLightCopyCommandBuffer->end();
 
 	vk::SubmitInfo submitInfo;
@@ -1987,19 +1950,13 @@ mResource.descriptorSet.get("lightculling_01")
 
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 0, descriptorSets, nullptr);	
 		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_bitonic"));
+		cmd.pushConstants(mResource.pipelineLayout.get("sort_bitonic"), vk::ShaderStageFlagBits::eCompute, 0, 4, &mLightsCount);
 		cmd.dispatch(lightWindowsCount, 1, 1);
 
-		// splitters
-		// cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_splitters"));
 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
-		// cmd.dispatch(1, 1, 1);
 		
 		if (mLightsCount > 128)
 		{
-			// todo remove this
-			// cmd.fillBuffer(*mLightsBuffers.handle, mLightsIndirectionOffset, mLightsIndirectionSize, 0);
-			
-
 			cmd.bindPipeline(vk::PipelineBindPoint::eCompute, mResource.pipeline.get("sort_mergeBitonic"));
 			
 			for (size_t i = 0; mLightsCount > (128u << i); i++)
@@ -2008,7 +1965,8 @@ mResource.descriptorSet.get("lightculling_01")
 				pcLeaves[i] = i + 1;
 			
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mResource.pipelineLayout.get("pageflag"), 1, mResource.descriptorSet.get(mLightBufferSwapUsed), nullptr);
-				cmd.pushConstants(mResource.pipelineLayout.get("bitonic_merge"), vk::ShaderStageFlagBits::eCompute, 0, 4, &pcLeaves[i]);
+				cmd.pushConstants(mResource.pipelineLayout.get("sort_mergeBitonic"), vk::ShaderStageFlagBits::eCompute, 0, 4, &mLightsCount);
+				cmd.pushConstants(mResource.pipelineLayout.get("sort_mergeBitonic"), vk::ShaderStageFlagBits::eCompute, 4, 4, &pcLeaves[i]);
 
 				// first time barrier is not neede - async splitters
 				if (i >= 0)	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, barrier, nullptr, nullptr);
@@ -2074,14 +2032,6 @@ mResource.descriptorSet.get("lightculling_01")
 	submitInfo.pCommandBuffers = &cmd;
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &*mLightSortingFinishedSemaphore;
-
-	// if (lightsUpdate)
-	// {
-	// 	submitInfo.waitSemaphoreCount = 1;
-	// 	submitInfo.pWaitSemaphores = &*mLightCopyFinishedSemaphore;
-	// 	submitInfo.pWaitDstStageMask = &waitStage;
-	// 	lightsUpdate = false;
-	// }
 
 	mContext.getComputeQueue().submit(submitInfo, nullptr);
 }

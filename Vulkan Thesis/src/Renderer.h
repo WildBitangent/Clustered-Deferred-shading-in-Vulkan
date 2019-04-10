@@ -134,7 +134,7 @@ private:
 	vk::DeviceSize mPagePoolSize;
 	vk::DeviceSize mUniqueClustersSize;
 
-	size_t mLightsCount; // for sorting
+	uint32_t mLightsCount; // for sorting
 	size_t mCurrentTileSize = 32;
 	size_t mSubGroupSize;
 	

@@ -15,12 +15,11 @@ layout(set = 0, binding = 0) uniform CameraUBO
 	mat4 proj;
 	mat4 invProj;
 	vec3 position;
+	uvec2 screenSize;
 } camera;
 
 layout(std430, set = 1, binding = 0) buffer LightsIn
 {
-	uvec3 lightCount_screenSize;
-	uint pad;
 	Light lightsIn[];
 };
 
@@ -32,6 +31,11 @@ layout(std430, set = 1, binding = 2) buffer Swap
 layout(std430, set = 1, binding = 7) buffer Splitters
 {
 	Key splitters[];
+};
+
+layout(push_constant) uniform pushConstants 
+{
+	uint lightCount;
 };
 
 shared uint mortons[LOCAL_SIZE * 4]; // 4 elements per thread
@@ -118,7 +122,7 @@ void main()
 	{
 		uint index = ((tid & ~0x1F) << 2) + (tid & 0x1F) + (i << 5);
 		uint offset = gl_WorkGroupID.x << 10;
-		if (offset + index < lightCount_screenSize.x)
+		if (offset + index < lightCount)
 		{
 			vec3 pos = (camera.view * vec4(lightsIn[offset + index].position, 1.0)).xyz;
 			uint morton = morton3D(pos);

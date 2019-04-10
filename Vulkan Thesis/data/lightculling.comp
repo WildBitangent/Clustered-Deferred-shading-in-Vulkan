@@ -21,12 +21,11 @@ layout(set = 0, binding = 0) uniform CameraUBO
 	mat4 proj;
 	mat4 invProj;
 	vec3 position;
+	uvec2 screenSize;
 } camera;
 
 layout(std430, set = 1, binding = 0) buffer readonly LightsIn
 {
-	uvec3 lightCount_screenSize;
-	uint pad;
 	Light lightsIn[];
 };
 
@@ -71,6 +70,14 @@ layout(std430, set = 1, binding = 6) buffer readonly CompactedClusters
 	uint data[];
 } comp;
 
+layout(push_constant) uniform pushConstants 
+{
+	int maxLevel;
+	LevelParam levelParam[5];
+};
+
+shared uint lightIndices[4096];
+
 // ------------- VARIABLES -------------
 ViewFrustum createFrustum(uvec3 clusterID)
 {
@@ -79,7 +86,7 @@ ViewFrustum createFrustum(uvec3 clusterID)
 	float near = (1.0 / (exp(clusterID.z * Y_SLICES) * 0.5) - 2) / -1.99;
 	float far = (1.0 / (exp((clusterID.z + 1) * Y_SLICES) * 0.5) - 2) / -1.99;
 	
-	uvec2 tileCount = (lightCount_screenSize.yz - 1) / TILE_SIZE + 1;
+	uvec2 tileCount = (camera.screenSize - 1) / TILE_SIZE + 1;
 	uvec2 tileID = clusterID.xy;
 	vec2 step = 2.0 * vec2(TILE_SIZE, TILE_SIZE) / vec2(tileCount * TILE_SIZE);
 
@@ -164,14 +171,6 @@ uint addressTranslate(uint virtualAddress)
 
 	return pageAddress + offset;
 }
-
-layout(push_constant) uniform pushConstants 
-{
-	int maxLevel;
-	LevelParam levelParam[5];
-};
-
-shared uint lightIndices[4096];
 
 void testLastLevelCollisions(ViewFrustum frustum, uint offset)
 {
@@ -304,13 +303,6 @@ void main()
 	else
 		testLastLevelCollisions(frustum, 0);
 
-	// if (collideAABB(frustum, bvh.nodes[levelParam[1].offset]))
-	// {
-	// 	if (subgroupElect())
-	// 		lightIndices[sharedMemoryOffset + 1] = 32;
-	// 	lightIndices[sharedMemoryOffset + gl_SubgroupInvocationID + 64] = gl_SubgroupInvocationID;
-	// }
-
 	uint sharedMemLightCounter = lightIndices[sharedMemoryOffset + 1];
 
 	// write lights left in shared memory
@@ -346,46 +338,3 @@ void main()
 	if (subgroupElect())
 		pool.data[addressTranslate(key)] = offset;
 }
-
-
-// void main()
-// {
-// 	uint tid = gl_LocalInvocationIndex;
-
-// 	for (uint i = gl_GlobalInvocationID.x; i < comp.counter; i += gl_WorkGroupSize.x * gl_NumWorkGroups.x)
-// 	{
-// 		uint key = comp.data[i];
-// 		ViewFrustum frustum = createFrustum(uvec3(key & 0x7F, (key >> 7) & 0x7F, key >> 14));
-
-// 		uint lightCount = 0;
-// 		uint lightIndices[500];
-
-// 		for (uint x = 0; x < lightCount_screenSize.x; x++)
-// 		{
-// 			if (collideSphere(frustum, lightsIn[x].position, lightsIn[x].radius))
-// 				lightIndices[lightCount++] = x;				
-// 		}
-
-// //		 if (i == 0)
-// //		 {
-// //		 	uint index = atomicAdd(lightsOut.count, 4);
-// //		 	vec4 position = camera.view * vec4(lightsIn[0].position, 1.0);
-// //		 	lightsOut.lights[index++] = floatBitsToUint(frustum.near);
-// //		 	lightsOut.lights[index++] = floatBitsToUint(frustum.far);
-// //		 	lightsOut.lights[index++] = floatBitsToUint(position.z);
-// //		 	lightsOut.lights[index++] = key >> 14;
-// //		 }
-
-// 		if (lightCount > 0)
-// 		{
-// 			uint index = atomicAdd(lightsOut.indirectCount, lightCount + 1);
-// 			pool.data[addressTranslate(key)] = index;
-// 			lightsOut.lights[index++] = lightCount;
-			
-// 			for (uint x = 0; x < lightCount; x++)
-// 				lightsOut.lights[index + x] = lightIndices[x];
-// 		}
-// 		else
-// 			pool.data[addressTranslate(key)] = 0; // point to dummy
-// 	}
-// }

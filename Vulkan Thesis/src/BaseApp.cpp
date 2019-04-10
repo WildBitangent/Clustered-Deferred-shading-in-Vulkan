@@ -24,6 +24,9 @@ void BaseApp::run()
 	auto current = std::chrono::high_resolution_clock::now();
 	float deltaTime;
 
+	// set camera for the first time
+	mRenderer.setCamera(mCamera.getViewMatrix(), mCamera.position);
+
 	while (!glfwWindowShouldClose(mWindow))
 	{
 		current = std::chrono::high_resolution_clock::now();
