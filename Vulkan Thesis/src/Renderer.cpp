@@ -1339,20 +1339,15 @@ void Renderer::createSyncPrimitives()
 	vk::FenceCreateInfo fenceInfo;
 	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
 
-	mLightCullingFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
-	mLightSortingFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
-	mGBufferFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
-	
-	mLightCopyFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
-	mLightCopyFence = mContext.getDevice().createFenceUnique(fenceInfo);
+	mResource.semaphore.add("lightCullingFinished");
+	mResource.semaphore.add("lightSortingFinished");
+	mResource.semaphore.add("lightCopyFinished");
+	mResource.semaphore.add("gBufferFinished");
+	mResource.semaphore.add("renderFinished", mSwapchainImages.size());
+	mResource.semaphore.add("imageAvailable", mSwapchainImages.size());
 
-	for (size_t i = 0; i < mSwapchainImages.size(); i++)
-	{
-		mRenderFinishedSemaphore.emplace_back(mContext.getDevice().createSemaphoreUnique({}));
-		mImageAvailableSemaphore.emplace_back(mContext.getDevice().createSemaphoreUnique({}));
-
-		mFences.emplace_back(mContext.getDevice().createFenceUnique(fenceInfo));
-	}
+	mResource.fence.add("lightCopy");
+	// mResource.fence.add("renderFinished", mSwapchainImages.size());
 }
 
 void Renderer::createComputePipeline()
@@ -1559,7 +1554,7 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	vk::SubmitInfo submitInfo;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &*mLightCopyCommandBuffer;
-	submitInfo.pSignalSemaphores = &*mLightCopyFinishedSemaphore;
+	submitInfo.pSignalSemaphores = &mResource.semaphore.get("lightCopyFinished");
 
 	mContext.getComputeQueue().submit(1, &submitInfo, nullptr);
 }
@@ -1569,10 +1564,9 @@ void Renderer::drawFrame()
 	// Acquire an image from the swap chain
 	uint32_t imageIndex;
 	{
-
 		try
 		{
-			auto result = mContext.getDevice().acquireNextImageKHR(*mSwapchain, std::numeric_limits<uint64_t>::max(), *mImageAvailableSemaphore[mCurrentFrame], nullptr);
+			auto result = mContext.getDevice().acquireNextImageKHR(*mSwapchain, std::numeric_limits<uint64_t>::max(), mResource.semaphore.get("imageAvailable", mCurrentFrame), nullptr);
 			imageIndex = result.value;
 		}
 		catch(const vk::OutOfDateKHRError& e)
@@ -1594,12 +1588,12 @@ void Renderer::drawFrame()
 
 		vk::SubmitInfo submitInfo;
 		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &*mImageAvailableSemaphore[imageIndex];
+		submitInfo.pWaitSemaphores = &mResource.semaphore.get("imageAvailable", imageIndex);
 		submitInfo.pWaitDstStageMask = &waitStages;
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &*mGBufferCommandBuffer;
 		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &*mGBufferFinishedSemaphore;
+		submitInfo.pSignalSemaphores = &mResource.semaphore.get("gBufferFinished");
 
 		// submitInfos.emplace_back(submitInfo);
 		mContext.getGeneralQueue().submit(submitInfo, nullptr);
@@ -1652,12 +1646,12 @@ void Renderer::drawFrame()
 
 			vk::SubmitInfo submitInfo;
 			submitInfo.waitSemaphoreCount = 1;
-			submitInfo.pWaitSemaphores = &*mLightCullingFinishedSemaphore;
+			submitInfo.pWaitSemaphores = &mResource.semaphore.get("lightCullingFinished");
 			submitInfo.pWaitDstStageMask = &waitStages;
 			submitInfo.commandBufferCount = 1;
 			submitInfo.pCommandBuffers = &*mPrimaryCompositionCommandBuffers[imageIndex];
 			submitInfo.signalSemaphoreCount = 1;
-			submitInfo.pSignalSemaphores = &*mRenderFinishedSemaphore[imageIndex];
+			submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
 
 			submitInfos.emplace_back(submitInfo);
 		}
@@ -1693,12 +1687,12 @@ void Renderer::drawFrame()
 
 		vk::SubmitInfo submitInfo;
 		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &*mGBufferFinishedSemaphore;
+		submitInfo.pWaitSemaphores = &mResource.semaphore.get("gBufferFinished");
 		submitInfo.pWaitDstStageMask = &waitStages;
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &*mPrimaryDebugCommandBuffers[imageIndex];
 		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &*mRenderFinishedSemaphore[imageIndex];
+		submitInfo.pSignalSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
 
 		submitInfos.emplace_back(submitInfo);
 	}
@@ -1709,7 +1703,7 @@ void Renderer::drawFrame()
 	{
 		vk::PresentInfoKHR presentInfo;
 		presentInfo.waitSemaphoreCount = 1;
-		presentInfo.pWaitSemaphores = &*mRenderFinishedSemaphore[imageIndex];
+		presentInfo.pWaitSemaphores = &mResource.semaphore.get("renderFinished", imageIndex);
 		presentInfo.swapchainCount = 1;
 		presentInfo.pSwapchains = &*mSwapchain;
 		presentInfo.pImageIndices = &imageIndex;
@@ -1775,7 +1769,10 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 	cmd.end();
 	
 	std::vector<vk::PipelineStageFlags> waitStages = {vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer};
-	std::vector<vk::Semaphore> waitSemaphores = {*mGBufferFinishedSemaphore, *mLightSortingFinishedSemaphore};
+	std::vector<vk::Semaphore> waitSemaphores = { 
+		mResource.semaphore.get("gBufferFinished"), 
+		mResource.semaphore.get("lightSortingFinished")
+	};
 
 	vk::SubmitInfo submitInfo;
 	submitInfo.waitSemaphoreCount = 2;
@@ -1784,7 +1781,7 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &cmd;
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &*mLightCullingFinishedSemaphore;
+	submitInfo.pSignalSemaphores = &mResource.semaphore.get("lightCullingFinished");
 
 	mContext.getGeneralQueue().submit(submitInfo, nullptr);
 }
@@ -1910,7 +1907,7 @@ mResource.descriptorSet.get("lightculling_01")
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &cmd;
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &*mLightSortingFinishedSemaphore;
+	submitInfo.pSignalSemaphores = &mResource.semaphore.get("lightSortingFinished");
 
 	mContext.getComputeQueue().submit(submitInfo, nullptr);
 }

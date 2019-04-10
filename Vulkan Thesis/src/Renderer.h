@@ -79,19 +79,7 @@ private:
 	vk::UniqueCommandBuffer mGBufferCommandBuffer;
 	std::vector<vk::UniqueCommandBuffer> mPrimaryDebugCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffers;
-
-	// semaphores // TODO move to resource handler
-	std::vector<vk::UniqueSemaphore> mImageAvailableSemaphore;
-	vk::UniqueSemaphore mGBufferFinishedSemaphore;
-	vk::UniqueSemaphore mLightCullingFinishedSemaphore;
-	vk::UniqueSemaphore mLightSortingFinishedSemaphore;
-	std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphore;
-	vk::UniqueSemaphore mLightCopyFinishedSemaphore;
-	// vk::UniqueSemaphore mCameraUBOCopyFinishedSemaphore; 
-
-	std::vector<vk::UniqueFence> mFences;
-	vk::UniqueFence mLightCopyFence;
-
+	
 	// G Buffer
 	GBuffer mGBufferAttachments;
 	vk::UniqueRenderPass mGBufferRenderpass;

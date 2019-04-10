@@ -11,13 +11,6 @@ namespace resource
 	public:
 		explicit Base(const vk::Device device) : mDevice(device) {}
 
-		// virtual void add(const std::string& key, const Info& a) = 0;
-
-		// T& get(const std::string& key)
-		// {
-		// 	return mData.at(key);
-		// }
-
 		const T& get(const std::string& key) const
 		{
 			return *mData.at(key);
@@ -25,6 +18,22 @@ namespace resource
 
 	protected:
 		std::unordered_map<std::string, U> mData;
+		vk::Device mDevice;
+	};
+
+	template<typename U, typename T>
+	class BaseVector
+	{
+	public:
+		explicit BaseVector(const vk::Device device) : mDevice(device) {}
+
+		const T& get(const std::string& key, size_t index = 0) const
+		{
+			return *mData.at(key).at(index);
+		}
+
+	protected:
+		std::unordered_map<std::string, std::vector<U>> mData;
 		vk::Device mDevice;
 	};
 
@@ -69,6 +78,22 @@ namespace resource
 		vk::ShaderModule add(const std::string& key);
 	};
 
+	class Semaphore : public BaseVector<vk::UniqueSemaphore, vk::Semaphore>
+	{
+	public:
+		explicit Semaphore(const vk::Device device) : BaseVector(device) {}
+
+		void add(const std::string& key, size_t count = 1);
+	};
+	
+	class Fence : public BaseVector<vk::UniqueFence, vk::Fence>
+	{
+	public:
+		explicit Fence(const vk::Device device) : BaseVector(device) {}
+
+		void add(const std::string& key, size_t count = 1);
+	};
+
 	struct Resources
 	{
 		explicit Resources(const vk::Device device);
@@ -78,6 +103,8 @@ namespace resource
 		DescriptorSetLayout descriptorSetLayout;
 		DescriptorSet descriptorSet;
 		ShaderModule shaderModule;
+		Semaphore semaphore;
+		Fence fence;
 	};
 }
 

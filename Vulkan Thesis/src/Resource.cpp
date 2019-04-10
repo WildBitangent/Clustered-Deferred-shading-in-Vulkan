@@ -49,12 +49,34 @@ vk::ShaderModule ShaderModule::add(const std::string& key)
 	return *mData[key];
 }
 
+void Semaphore::add(const std::string& key, size_t count)
+{
+	std::vector<vk::UniqueSemaphore> sem;
+
+	for (size_t i = 0; i < count; i++)
+		sem.emplace_back(mDevice.createSemaphoreUnique({}));
+
+	mData.insert_or_assign(key, std::move(sem));
+}
+
+void Fence::add(const std::string& key, size_t count)
+{
+	std::vector<vk::UniqueFence> fen;
+
+	for (size_t i = 0; i < count; i++)
+		fen.emplace_back(mDevice.createFenceUnique({}));
+
+	mData.insert_or_assign(key, std::move(fen));
+}
+
 Resources::Resources(const vk::Device device)
 	: pipelineLayout(device)
 	, pipeline(device)
 	, descriptorSetLayout(device)
 	, descriptorSet(device)
 	, shaderModule(device)
+	, semaphore(device)
+	, fence(device)
 {
 }
 
