@@ -56,6 +56,7 @@ public:
 	bool debugStateUniformNeedsUpdate();
 
 	void update();
+	void resize();
 	void copyDrawData();
 	void recordCommandBuffer();
 	vk::UniqueCommandBuffer& getCommandBuffer();

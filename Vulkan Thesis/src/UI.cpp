@@ -105,6 +105,11 @@ void UI::update()
 	End();
 }
 
+void UI::resize()
+{
+	createPipeline();
+}
+
 void UI::copyDrawData()
 {
 	auto drawData = ImGui::GetDrawData();

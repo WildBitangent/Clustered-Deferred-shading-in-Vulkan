@@ -9,29 +9,18 @@
 struct GLFWwindow;
 struct PointLight;
 
-// enum class TileSize
-// {
-// 	_8x8 = 8,
-// 	_16x16 = 16,
-// 	_32x32 = 32,
-// 	_64x64 = 64,
-// };
-
 class Renderer
 {
 public:
 	Renderer(GLFWwindow* window, ThreadPool& pool); // todo move thread pool to utility when it's singleton
-	// ~Renderer();
 
-	//void resize(int width, int height);
+	void resize();
 	void requestDraw(float deltatime);
 	void cleanUp();
 
 	void setCamera(const glm::mat4& view, const glm::vec3 campos);
 	void updateLights(const std::vector<PointLight>& lights); 
-
 	void reloadShaders(size_t size);
-	// void changeTileSize(TileSize size);
 
 private:
 	void recreateSwapChain();
@@ -81,6 +70,9 @@ private:
 	vk::UniquePipelineCache mPipelineCache;
 
 	// command buffers
+	vk::UniqueCommandBuffer mLightCopyCommandBuffer;
+	// vk::UniqueCommandBuffer mCameraUBOCopyCommandBuffer;
+
 	std::vector<vk::UniqueCommandBuffer> mPrimaryCompositionCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mCompositionCommandBuffers;
 	std::vector<vk::UniqueCommandBuffer> mPrimaryLightCullingCommandBuffer;
@@ -91,13 +83,16 @@ private:
 	std::vector<vk::UniqueCommandBuffer> mDebugCommandBuffers;
 
 	// semaphores // TODO move to resource handler
-	std::vector<vk::UniqueSemaphore> mImageAvailableSemaphore; // todo alloc
+	std::vector<vk::UniqueSemaphore> mImageAvailableSemaphore;
 	vk::UniqueSemaphore mGBufferFinishedSemaphore;
 	vk::UniqueSemaphore mLightCullingFinishedSemaphore;
 	vk::UniqueSemaphore mLightSortingFinishedSemaphore;
-	std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphore; // todo
+	std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphore;
+	vk::UniqueSemaphore mLightCopyFinishedSemaphore;
+	// vk::UniqueSemaphore mCameraUBOCopyFinishedSemaphore; 
 
 	std::vector<vk::UniqueFence> mFences;
+	vk::UniqueFence mLightCopyFence;
 
 	// G Buffer
 	GBuffer mGBufferAttachments;
@@ -142,11 +137,13 @@ private:
 	size_t mLightsCount; // for sorting
 	size_t mCurrentTileSize = 32;
 	size_t mSubGroupSize;
-	std::string mLightBufferSwapUsed = "lightculling_01";
-
+	
 	// todo rewrite this
+	std::string mLightBufferSwapUsed = "lightculling_01";
 	uint32_t maxLevel;
 	std::vector<std::pair<uint32_t, uint32_t>> levelParam;
+
+	bool lightsUpdate = false;
 	
 	glm::uvec2 mTileCount;
 

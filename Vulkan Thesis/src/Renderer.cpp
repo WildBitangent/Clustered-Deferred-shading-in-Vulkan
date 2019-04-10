@@ -16,6 +16,8 @@
 constexpr auto MAX_LIGHTS_PER_TILE = 1024;
 constexpr auto MAX_POINTLIGHTS = 500000;
 
+
+// todo refactor structs
 struct CameraUBO
 {
 	glm::mat4 view;
@@ -75,10 +77,10 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createSyncPrimitives();
 }
 
-// Renderer::~Renderer()
-// {
-// 	mContext.getDevice().waitIdle(); // finish everything before destroying
-// }
+void Renderer::resize()
+{
+	recreateSwapChain();
+}
 
 void Renderer::requestDraw(float deltatime)
 {
@@ -92,11 +94,6 @@ void Renderer::cleanUp()
 	mContext.getDevice().waitIdle(); // finish everything before destroying
 }
 
-// void Renderer::cleanUp()
-// {
-// 	mContext.getDevice().waitIdle();
-// }
-
 void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 {
 	// update camera ubo
@@ -104,12 +101,11 @@ void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
 		auto data = reinterpret_cast<CameraUBO*>(mContext.getDevice().mapMemory(*mCameraStagingBuffer.memory, 0, sizeof(CameraUBO)));
 		data->view = view;
 		data->projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.5f, 100.0f);
-		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
+		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down TODO extension viewport -1
 		data->invProj = glm::inverse(data->projection);
 		data->cameraPosition = campos;
 
 		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
-		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
 	}
 }
 
@@ -134,6 +130,7 @@ void Renderer::recreateSwapChain()
         glfwWaitEvents();
     }
 
+	setTileCount();
 	vkDeviceWaitIdle(mContext.getDevice());
 
 	createSwapChain();
@@ -142,6 +139,9 @@ void Renderer::recreateSwapChain()
 	createRenderPasses();
 	createGraphicsPipelines();
 	createGraphicsCommandBuffers();
+	createComputePipeline();
+	createComputeCommandBuffer();
+	BaseApp::getInstance().getUI().resize();
 }
 
 void Renderer::createSwapChain()
@@ -155,14 +155,9 @@ void Renderer::createSwapChain()
 	auto presentMode = mUtility.chooseSwapPresentMode(presentModes);
 	auto extent = mUtility.chooseSwapExtent(capabilities);
 
-	// 0 for maxImageCount means no limit
-	uint32_t queueSize = capabilities.minImageCount + 1;
-	if (capabilities.maxImageCount > 0 && queueSize > capabilities.maxImageCount)
-		queueSize = capabilities.maxImageCount;
-
 	vk::SwapchainCreateInfoKHR swapchainInfo;
 	swapchainInfo.surface = mContext.getWindowSurface();
-	swapchainInfo.minImageCount = queueSize;
+	swapchainInfo.minImageCount = 2; // only double buffer 
 	swapchainInfo.imageFormat = surfaceFormat.format;
 	swapchainInfo.imageColorSpace = surfaceFormat.colorSpace;
 	swapchainInfo.imageExtent = extent;
@@ -1314,6 +1309,12 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = 1;
 
+		vk::BufferMemoryBarrier barrier;
+		barrier.size = sizeof(CameraUBO);
+		barrier.buffer = *mCameraUniformBuffer.handle;
+		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		barrier.dstAccessMask = vk::AccessFlagBits::eUniformRead;
+
 		mGBufferCommandBuffer = std::move(mContext.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
 
 		auto& cmd = *mGBufferCommandBuffer;
@@ -1322,6 +1323,9 @@ void Renderer::createGraphicsCommandBuffers()
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 
 		cmd.begin(beginInfo);
+		
+		mUtility.recordCopyBuffer(cmd, *mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eVertexShader, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
 
 		vk::RenderPassBeginInfo renderpassInfo;
 		renderpassInfo.renderPass = *mGBufferRenderpass;
@@ -1451,6 +1455,9 @@ void Renderer::createSyncPrimitives()
 	mLightCullingFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
 	mLightSortingFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
 	mGBufferFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
+	
+	mLightCopyFinishedSemaphore = mContext.getDevice().createSemaphoreUnique({});
+	mLightCopyFence = mContext.getDevice().createFenceUnique(fenceInfo);
 
 	for (size_t i = 0; i < mSwapchainImages.size(); i++)
 	{
@@ -1592,6 +1599,9 @@ void Renderer::createComputeCommandBuffer()
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = static_cast<uint32_t>(mSwapchainFramebuffers.size());
 		mLightSortingCommandBuffers = mContext.getDevice().allocateCommandBuffersUnique(allocInfo);
+
+		allocInfo.commandBufferCount = 1;
+		mLightCopyCommandBuffer = std::move(mContext.getDevice().allocateCommandBuffersUnique(allocInfo)[0]);
 	}
 
 	// Record command buffer
@@ -1689,6 +1699,9 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 	auto memorySize = sizeof(PointLight) * mLightsCount + sizeof(glm::vec4);
 	auto lightBuffer = reinterpret_cast<uint8_t*>(mContext.getDevice().mapMemory(*mPointLightsStagingBuffer.memory, 0, memorySize + 8192));
 
+	mContext.getDevice().waitForFences(1, &*mLightCopyFence, true, std::numeric_limits<uint64_t>::max());
+	mContext.getDevice().resetFences(1, &*mLightCopyFence);
+
 	*reinterpret_cast<LightParams*>(lightBuffer) = { static_cast<uint32_t>(mLightsCount), {mSwapchainExtent.width, mSwapchainExtent.height} };
 	memcpy(lightBuffer + sizeof(glm::vec4), lights.data(), memorySize);
 
@@ -1698,10 +1711,23 @@ void Renderer::updateLights(const std::vector<PointLight>& lights)
 		reinterpret_cast<uint32_t*>(lightBuffer + memorySize)[i * 2 + 1] = distribution(generator);
 
 	mContext.getDevice().unmapMemory(*mPointLightsStagingBuffer.memory);
+		
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
 
-	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset); // TODO use transfer queue
-	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, sizeof(glm::vec4), 0, mLightsIndirectionOffset); // TODO use transfer queue
-	mUtility.copyBuffer(*mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, 8192, memorySize, mSplittersOffset); // TODO use transfer queue
+	mLightCopyCommandBuffer->begin(beginInfo);
+	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, memorySize, 0, mPointLightsOffset);
+	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, sizeof(glm::vec4), 0, mLightsIndirectionOffset);
+	mUtility.recordCopyBuffer(*mLightCopyCommandBuffer, *mPointLightsStagingBuffer.handle, *mLightsBuffers.handle, 8192, memorySize, mSplittersOffset);
+	mLightCopyCommandBuffer->end();
+
+	vk::SubmitInfo submitInfo;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &*mLightCopyCommandBuffer;
+	submitInfo.pSignalSemaphores = &*mLightCopyFinishedSemaphore;
+
+	mContext.getComputeQueue().submit(1, &submitInfo, *mLightCopyFence);
+	lightsUpdate = true;
 }
 
 void Renderer::drawFrame()
@@ -1955,6 +1981,17 @@ mResource.descriptorSet.get("lightculling_01")
 
 	cmd.begin(vk::CommandBufferBeginInfo{});
 
+	// wait for lights update
+	{
+		vk::BufferMemoryBarrier barrier;
+		barrier.size = mPointLightsSize;
+		barrier.buffer = *mLightsBuffers.handle;
+		barrier.offset = mPointLightsOffset;
+		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, nullptr, barrier, nullptr);
+	}
+
 	// light sorting
 	{
 		size_t lightWindowsCount = (1023 + mLightsCount) >> 10;
@@ -2040,12 +2077,22 @@ mResource.descriptorSet.get("lightculling_01")
 	}
 
 	cmd.end();
-	
+
+	// vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eComputeShader; // todo mb bottom
+
 	vk::SubmitInfo submitInfo;
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &cmd;
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &*mLightSortingFinishedSemaphore;
+
+	// if (lightsUpdate)
+	// {
+	// 	submitInfo.waitSemaphoreCount = 1;
+	// 	submitInfo.pWaitSemaphores = &*mLightCopyFinishedSemaphore;
+	// 	submitInfo.pWaitDstStageMask = &waitStage;
+	// 	lightsUpdate = false;
+	// }
 
 	mContext.getComputeQueue().submit(submitInfo, nullptr);
 }

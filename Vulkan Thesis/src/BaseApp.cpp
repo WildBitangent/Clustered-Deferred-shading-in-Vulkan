@@ -31,7 +31,7 @@ void BaseApp::run()
 
 		glfwPollEvents();
 
-		if (deltaTime > 1.0 / 60.0)
+		// if (deltaTime > 1.0 / 60.0)
 		{
 			tick(deltaTime);
 			startTime = current;
@@ -40,8 +40,8 @@ void BaseApp::run()
 			mRenderer.updateLights(mLights);
 			// mRenderer.cleanUp();
 		}
-		else if (mUI.mContext.vSync) // TODO bug blinking
-			continue;
+		// else if (mUI.mContext.vSync) // TODO bug blinking
+			// continue;
 
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
@@ -110,7 +110,7 @@ GLFWwindow* BaseApp::createWindow()
 	glfwInit();
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // no OpenGL context
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 	// const auto mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
 	// glfwWindowHint(GLFW_RED_BITS, mode->redBits);
 	// glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
@@ -120,6 +120,7 @@ GLFWwindow* BaseApp::createWindow()
 	// auto window = glfwCreateWindow(mode->width, mode->height, "Clustered deferred shading in Vulkan", glfwGetPrimaryMonitor(), nullptr);
 
 	glfwSetWindowUserPointer(window, this);
+
 
 	auto cursorposCallback = [](GLFWwindow* window, double xPos, double yPos)
 	{
@@ -136,9 +137,15 @@ GLFWwindow* BaseApp::createWindow()
 		getInstance().onKeyPress(key, scancode, action, mods);
 	};
 
+	auto resizeCallback = [](GLFWwindow* window, int width, int height)
+	{
+		getInstance().getRenderer().resize();
+	};
+
 	glfwSetCursorPosCallback(window, cursorposCallback);
 	glfwSetMouseButtonCallback(window, mousebuttonCallback);
 	glfwSetKeyCallback(window, keyCallback);
+	glfwSetWindowSizeCallback(window, resizeCallback);
 
 	return window;
 }
