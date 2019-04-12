@@ -26,7 +26,7 @@ vk::DescriptorSetLayout DescriptorSetLayout::add(const std::string& key, vk::Des
 
 vk::DescriptorSet DescriptorSet::add(const std::string& key, vk::DescriptorSetAllocateInfo allocInfo)
 {
-	return *mData.insert_or_assign(key, std::move(mDevice.allocateDescriptorSetsUnique(allocInfo)[0])).first->second;
+	return *mData.insert_or_assign(key, mDevice.allocateDescriptorSetsUnique(allocInfo)).first->second[0];
 }
 
 vk::ShaderModule ShaderModule::add(const std::string& key)
@@ -61,10 +61,13 @@ void Semaphore::add(const std::string& key, size_t count)
 
 void Fence::add(const std::string& key, size_t count)
 {
+	vk::FenceCreateInfo info;
+	info.flags = vk::FenceCreateFlagBits::eSignaled;
+
 	std::vector<vk::UniqueFence> fen;
 
 	for (size_t i = 0; i < count; i++)
-		fen.emplace_back(mDevice.createFenceUnique({}));
+		fen.emplace_back(mDevice.createFenceUnique(info));
 
 	mData.insert_or_assign(key, std::move(fen));
 }

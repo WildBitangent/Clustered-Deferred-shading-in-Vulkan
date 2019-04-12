@@ -63,6 +63,7 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createDescriptorPool();
 	// mModel.loadModel(mContext, "data/models/sponza.obj", *mSampler, *mDescriptorPool, mResource, pool);
 	mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mSampler, *mDescriptorPool, mResource, pool);
+	createDescriptorSets();
 	updateDescriptorSets();
 	createGraphicsCommandBuffers();
 	createComputeCommandBuffer();
@@ -410,7 +411,6 @@ void Renderer::createFrameBuffers()
 			mSwapchainFramebuffers.emplace_back(mContext.getDevice().createFramebufferUnique(framebufferInfo));
 		}
 	}
-
 }
 
 void Renderer::createDescriptorSetLayouts()
@@ -850,61 +850,7 @@ void Renderer::createGraphicsPipelines()
 
 void Renderer::createGBuffers()
 {
-	// depth buffer
-	{
-		auto formatCandidates = { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint };
-		auto depthFormat = mUtility.findSupportedFormat(formatCandidates, vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment);
-
-		// for depth pre pass and output as texture
-		mGBufferAttachments.depth = mUtility.createImage(
-			mSwapchainExtent.width, mSwapchainExtent.height,
-			depthFormat,
-			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-
-		mGBufferAttachments.depth.view = mUtility.createImageView(*mGBufferAttachments.depth.handle, depthFormat, vk::ImageAspectFlagBits::eDepth);
-	}
-
-	// position
-	{
-		mGBufferAttachments.position = mUtility.createImage(
-			mSwapchainExtent.width, mSwapchainExtent.height,
-			vk::Format::eR16G16B16A16Sfloat,
-			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-
-		mGBufferAttachments.position.view = mUtility.createImageView(*mGBufferAttachments.position.handle, mGBufferAttachments.position.format, vk::ImageAspectFlagBits::eColor);
-	}
-
-	// color
-	{
-		mGBufferAttachments.color = mUtility.createImage(
-			mSwapchainExtent.width, mSwapchainExtent.height,
-			vk::Format::eR8G8B8A8Unorm,
-			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-
-		mGBufferAttachments.color.view = mUtility.createImageView(*mGBufferAttachments.color.handle, mGBufferAttachments.color.format, vk::ImageAspectFlagBits::eColor);
-	}
-
-	// normal
-	{
-		mGBufferAttachments.normal = mUtility.createImage(
-			mSwapchainExtent.width, mSwapchainExtent.height,
-			vk::Format::eR16G16Sfloat,
-			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-
-		mGBufferAttachments.normal.view = mUtility.createImageView(*mGBufferAttachments.normal.handle, mGBufferAttachments.normal.format, vk::ImageAspectFlagBits::eColor);
-	}
+	mGBufferAttachments = generateGBuffer();
 }
 
 void Renderer::createSampler()
@@ -945,8 +891,8 @@ void Renderer::createUniformBuffers()
 	// Adding data to scene object buffer
 	{ 
 		ObjectUBO ubo;
-		ubo.model = glm::scale(glm::mat4(1.f), glm::vec3(0.01f)); // TODO update uniform for objects
-	
+		ubo.model = glm::scale(glm::mat4(1.f), glm::vec3(0.01f)); 
+
 		auto data = mContext.getDevice().mapMemory(*mObjectStagingBuffer.memory, 0, sizeof(ubo), {});
 		memcpy(data, &ubo, sizeof(ubo));
 		mContext.getDevice().unmapMemory(*mObjectStagingBuffer.memory);
@@ -993,7 +939,7 @@ void Renderer::createClusteredBuffers()
 	mPageTableSize = alignedMemorySize((32'768 + 3) * sizeof(uint32_t)); 
 
 	// physical page pool
-	constexpr vk::DeviceSize pageCount = 2048;
+	constexpr vk::DeviceSize pageCount = 4096;
 	constexpr vk::DeviceSize pageSize = 512 * sizeof(uint32_t);
 	
 	mPagePoolOffset = mPageTableSize;
@@ -1001,7 +947,7 @@ void Renderer::createClusteredBuffers()
 
 	// compacted unique clusters 
 	mUniqueClustersOffset = mPagePoolOffset + mPagePoolSize;
-	mUniqueClustersSize = alignedMemorySize(4096 * sizeof(uint32_t)); // default value, every scene should tweak this value
+	mUniqueClustersSize = alignedMemorySize(8192 * sizeof(uint32_t)); // default value, every scene should tweak this value
 
 	// allocate buffer
 	mClusteredBuffer = mUtility.createBuffer(
@@ -1059,92 +1005,91 @@ void Renderer::createDescriptorPool()
 	mDescriptorPool = mContext.getDevice().createDescriptorPoolUnique(poolInfo);
 }
 
-void Renderer::updateDescriptorSets()
+void Renderer::createDescriptorSets()
 {
-	std::vector<vk::WriteDescriptorSet> descriptorWrites;
+	vk::DescriptorSetAllocateInfo allocInfo;
+	allocInfo.descriptorPool = *mDescriptorPool;
+	allocInfo.descriptorSetCount = 1;
 	
+	// light culling
+	allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
+	mResource.descriptorSet.add("lightculling_01", allocInfo);
+	mResource.descriptorSet.add("lightculling_10", allocInfo);
+
+	// composition
+	allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("composition");
+	mResource.descriptorSet.add("composition_01", allocInfo);
+	mResource.descriptorSet.add("composition_10", allocInfo);
+
 	// world transform
-	vk::DescriptorBufferInfo transformBufferInfo;
-	transformBufferInfo.buffer = *mCameraUniformBuffer.handle;
-	transformBufferInfo.offset = 0;
-	transformBufferInfo.range = sizeof(CameraUBO);
+	allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("camera");
+	mResource.descriptorSet.add("camera", allocInfo);
+
+	// model
+	allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("model");
+	mResource.descriptorSet.add("model", allocInfo);
+
+	//debug
+	allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("debug");
+	mResource.descriptorSet.add("debug", allocInfo);
+}
+
+void Renderer::updateDescriptorSets()
+{	
+	// world transform
 	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("camera");
-
-		auto targetSet = mResource.descriptorSet.add("camera", allocInfo);
-
-		// refer to the uniform object buffer
+		vk::DescriptorBufferInfo transformBufferInfo;
+		transformBufferInfo.buffer = *mCameraUniformBuffer.handle;
+		transformBufferInfo.offset = 0;
+		transformBufferInfo.range = sizeof(CameraUBO);
+		
+		auto targetSet = mResource.descriptorSet.get("camera");
 		auto write = util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, transformBufferInfo);
-		descriptorWrites.emplace_back(write);
+		mContext.getDevice().updateDescriptorSets(write, nullptr);
 	}
 	
 	// Model
-	vk::DescriptorBufferInfo modelBufferInfo;
-	modelBufferInfo.buffer = *mObjectUniformBuffer.handle;
-	modelBufferInfo.offset = 0;
-	modelBufferInfo.range = sizeof(ObjectUBO);
 	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("model");
+		vk::DescriptorBufferInfo modelBufferInfo;
+		modelBufferInfo.buffer = *mObjectUniformBuffer.handle;
+		modelBufferInfo.offset = 0;
+		modelBufferInfo.range = sizeof(ObjectUBO);
 
-		const auto targetSet = mResource.descriptorSet.add("model", allocInfo);
+		auto targetSet = mResource.descriptorSet.get("model");
+		auto write = util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, modelBufferInfo);
+		mContext.getDevice().updateDescriptorSets(write, nullptr);
+	}
 
-		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, modelBufferInfo));
+	// debug
+	{
+		vk::DescriptorBufferInfo uboInfo;
+		uboInfo.buffer = *mDebugUniformBuffer.handle;
+		uboInfo.offset = 0;
+		uboInfo.range = mDebugUniformBuffer.size;
+
+		auto targetSet = mResource.descriptorSet.get("debug");
+		auto write = util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, uboInfo);
+		mContext.getDevice().updateDescriptorSets(write, nullptr);
 	}
 	
+	vk::DescriptorBufferInfo pointLightsInfo{ *mLightsBuffers.handle, mPointLightsOffset, mPointLightsSize };
+	vk::DescriptorBufferInfo lightsOutInfo{ *mLightsBuffers.handle, mLightsOutOffset, mLightsOutSize };
+	vk::DescriptorBufferInfo lightsIndirectionInfo{ *mLightsBuffers.handle, mLightsOutSwapOffset, mLightsOutSwap };
+	vk::DescriptorBufferInfo pageTableInfo{ *mClusteredBuffer.handle, mPageTableOffset, mPageTableSize };
+	vk::DescriptorBufferInfo pagePoolInfo{ *mClusteredBuffer.handle, mPagePoolOffset, mPagePoolSize };
+	vk::DescriptorBufferInfo uniqueClustersInfo{ *mClusteredBuffer.handle, mUniqueClustersOffset, mUniqueClustersSize };
+	vk::DescriptorBufferInfo splittersInfo{ *mLightsBuffers.handle, mSplittersOffset, mSplittersSize };
+	
+	vk::DescriptorImageInfo depthInfo{ *mSampler, *mGBufferAttachments.depth.view, vk::ImageLayout::eShaderReadOnlyOptimal };
+	vk::DescriptorImageInfo positionInfo{ *mSampler, *mGBufferAttachments.position.view, vk::ImageLayout::eShaderReadOnlyOptimal };
+	vk::DescriptorImageInfo albedoInfo{ *mSampler, *mGBufferAttachments.color.view, vk::ImageLayout::eShaderReadOnlyOptimal };
+	vk::DescriptorImageInfo normalInfo{ *mSampler, *mGBufferAttachments.normal.view, vk::ImageLayout::eShaderReadOnlyOptimal };
+
+	std::vector<vk::WriteDescriptorSet> descriptorWrites;
+
 	// Light culling
-	vk::DescriptorBufferInfo pointLightsInfo;
-	pointLightsInfo.buffer = *mLightsBuffers.handle;
-	pointLightsInfo.offset = mPointLightsOffset;
-	pointLightsInfo.range = mPointLightsSize;
-
-	vk::DescriptorBufferInfo lightsOutInfo;
-	lightsOutInfo.buffer = *mLightsBuffers.handle;
-	lightsOutInfo.offset = mLightsOutOffset;
-	lightsOutInfo.range = mLightsOutSize;
-
-	vk::DescriptorBufferInfo lightsIndirectionInfo;
-	lightsIndirectionInfo.buffer = *mLightsBuffers.handle;
-	lightsIndirectionInfo.offset = mLightsOutSwapOffset;
-	lightsIndirectionInfo.range = mLightsOutSwap;
-
-	vk::DescriptorBufferInfo pageTableInfo;
-	pageTableInfo.buffer = *mClusteredBuffer.handle;
-	pageTableInfo.offset = mPageTableOffset;
-	pageTableInfo.range = mPageTableSize;
-
-	vk::DescriptorBufferInfo pagePoolInfo;
-	pagePoolInfo.buffer = *mClusteredBuffer.handle;
-	pagePoolInfo.offset = mPagePoolOffset;
-	pagePoolInfo.range = mPagePoolSize;
-
-	vk::DescriptorBufferInfo uniqueClustersInfo;
-	uniqueClustersInfo.buffer = *mClusteredBuffer.handle;
-	uniqueClustersInfo.offset = mUniqueClustersOffset;
-	uniqueClustersInfo.range = mUniqueClustersSize;
-
-	vk::DescriptorBufferInfo splittersInfo;
-	splittersInfo.buffer = *mLightsBuffers.handle;
-	splittersInfo.offset = mSplittersOffset;
-	splittersInfo.range = mSplittersSize;
-
-	vk::DescriptorImageInfo depthInfo;
-	depthInfo.sampler = *mSampler;
-	depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-	depthInfo.imageView = *mGBufferAttachments.depth.view;
 	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("lightculling");
-
-		auto targetSet = mResource.descriptorSet.add("lightculling_01", allocInfo);
-
+		auto targetSet = mResource.descriptorSet.get("lightculling_01");
 		std::vector<vk::WriteDescriptorSet> writes;
 
 		uint32_t binding = 0;
@@ -1160,7 +1105,7 @@ void Renderer::updateDescriptorSets()
 		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 
 		// swapped light buffers
-		targetSet = mResource.descriptorSet.add("lightculling_10", allocInfo);
+		targetSet = mResource.descriptorSet.get("lightculling_10");
 		for (auto& item : writes)
 			item.dstSet = targetSet;
 
@@ -1168,30 +1113,10 @@ void Renderer::updateDescriptorSets()
 	
 		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 	}
-	
+		
 	// composition
-	vk::DescriptorImageInfo positionInfo;
-	positionInfo.sampler = *mSampler;
-	positionInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-	positionInfo.imageView = *mGBufferAttachments.position.view;
-
-	vk::DescriptorImageInfo albedoInfo;
-	albedoInfo.sampler = *mSampler;
-	albedoInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-	albedoInfo.imageView = *mGBufferAttachments.color.view;
-
-	vk::DescriptorImageInfo normalInfo;
-	normalInfo.sampler = *mSampler;
-	normalInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-	normalInfo.imageView = *mGBufferAttachments.normal.view;
 	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("composition");
-
-		auto targetSet = mResource.descriptorSet.add("composition_01", allocInfo);
-
+		auto targetSet = mResource.descriptorSet.get("composition_01");
 		std::vector<vk::WriteDescriptorSet> writes;
 
 		uint32_t binding = 0;
@@ -1209,7 +1134,7 @@ void Renderer::updateDescriptorSets()
 		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 		
 		// swapped light buffers
-		targetSet = mResource.descriptorSet.add("composition_10", allocInfo);
+		targetSet = mResource.descriptorSet.get("composition_10");
 		for (auto& item : writes)
 			item.dstSet = targetSet;
 
@@ -1217,23 +1142,7 @@ void Renderer::updateDescriptorSets()
 	
 		descriptorWrites.insert(descriptorWrites.end(), writes.begin(), writes.end());
 	}
-
-	// debug
-	vk::DescriptorBufferInfo uboInfo;
-	uboInfo.buffer = *mDebugUniformBuffer.handle;
-	uboInfo.offset = 0;
-	uboInfo.range = mDebugUniformBuffer.size;
-	{
-		vk::DescriptorSetAllocateInfo allocInfo;
-		allocInfo.descriptorPool = *mDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &mResource.descriptorSetLayout.get("debug");
 		
-		auto targetSet = mResource.descriptorSet.add("debug", allocInfo);
-		
-		descriptorWrites.emplace_back(util::createDescriptorWriteBuffer(targetSet, 0, vk::DescriptorType::eUniformBuffer, uboInfo));
-	}
-
 	mContext.getDevice().updateDescriptorSets(descriptorWrites, nullptr);
 }
 
@@ -1246,17 +1155,21 @@ void Renderer::createGraphicsCommandBuffers()
 		allocInfo.level = vk::CommandBufferLevel::ePrimary;
 		allocInfo.commandBufferCount = 1;
 
-		auto& cmd = mResource.cmd.add("gBuffer", allocInfo);
-
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
 
 		std::array<vk::ClearValue, 4> clearValues;
 		clearValues[0].color.setFloat32({ 0.0f, 0.0f, 0.0f, 0.0f });
-		clearValues[1].color.setFloat32({ 1.0f, 0.8f, 0.4f, 1.0f });
+		// clearValues[1].color.setFloat32({ 1.0f, 0.8f, 0.4f, 1.0f });
+		clearValues[1].color.setFloat32({ 0.0f, 0.0f, 0.0f, 0.0f });
 		clearValues[2].color.setFloat32({ 0.0f, 0.0f, 0.0f, 0.0f });
 		clearValues[3].depthStencil.setDepth(1.0f).setStencil(0.0f);
 
+		std::array<vk::DescriptorSet, 2> descriptorSets = {
+			mResource.descriptorSet.get("camera"),
+			mResource.descriptorSet.get("model")
+		};
+		
 		vk::RenderPassBeginInfo renderpassInfo;
 		renderpassInfo.renderPass = *mGBufferRenderpass;
 		renderpassInfo.framebuffer = *mGBufferFramebuffer;
@@ -1265,12 +1178,8 @@ void Renderer::createGraphicsCommandBuffers()
 		renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 		renderpassInfo.pClearValues = clearValues.data();
 
-		std::array<vk::DescriptorSet, 2> descriptorSets = {
-			mResource.descriptorSet.get("camera"),
-			mResource.descriptorSet.get("model")
-		};
-
 		auto pipelineLayout = mResource.pipelineLayout.get("gbuffers");
+		auto& cmd = mResource.cmd.add("gBuffer", allocInfo);
 		
 		cmd.begin(beginInfo);
 		cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
@@ -1286,7 +1195,7 @@ void Renderer::createGraphicsCommandBuffers()
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, static_cast<uint32_t>(descriptorSets.size()), materialSet, nullptr);
 			cmd.drawIndexed(part.indexCount, 1, 0, 0, 0);
 		}
-	
+
 		cmd.endRenderPass();
 		cmd.end();
 	}
@@ -1323,21 +1232,19 @@ void Renderer::createGraphicsCommandBuffers()
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eRenderPassContinue;
 		beginInfo.pInheritanceInfo = &inheritanceInfo;
+		
+		std::array<vk::DescriptorSet, 2> descriptorSets = {
+			mResource.descriptorSet.get("debug"),
+			mResource.descriptorSet.get("composition_01"),
+		};
 
 		// record command buffers
 		for (auto& cmd : mResource.cmd.getAll("debug"))
 		{
 			cmd->begin(beginInfo);
 			cmd->bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("debug"));
-			
-			std::array<vk::DescriptorSet, 2> descriptorSets = {
-				mResource.descriptorSet.get("debug"),
-				mResource.descriptorSet.get("composition_01"),
-			};
-			
 			cmd->bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mResource.pipelineLayout.get("debug"), 0, descriptorSets, nullptr);
 			cmd->draw(4, 1, 0, 0);
-			
 			cmd->end();
 		}
 	}
@@ -1345,18 +1252,16 @@ void Renderer::createGraphicsCommandBuffers()
 
 void Renderer::createSyncPrimitives()
 {
-	vk::FenceCreateInfo fenceInfo;
-	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
-
+	size_t count = mSwapchainImages.size();
 	mResource.semaphore.add("lightCullingFinished");
 	mResource.semaphore.add("lightSortingFinished");
 	mResource.semaphore.add("lightCopyFinished");
 	mResource.semaphore.add("gBufferFinished");
-	mResource.semaphore.add("renderFinished", mSwapchainImages.size());
-	mResource.semaphore.add("imageAvailable", mSwapchainImages.size());
+	mResource.semaphore.add("renderFinished", count);
+	mResource.semaphore.add("imageAvailable", count);
 
-	mResource.fence.add("lightCopy");
-	// mResource.fence.add("renderFinished", mSwapchainImages.size());
+	// mResource.fence.add("lightCopy", count);
+	// mResource.fence.add("renderFinished", count);
 }
 
 void Renderer::createComputePipeline()
@@ -1410,7 +1315,7 @@ void Renderer::createComputePipeline()
 	}
 
 	auto pipelineBase = mResource.pipeline.get("pageflag");
-	for (const auto& name : { "pagealloc", "pagestore", "pagecompact" }) // todo remove unused pipelines
+	for (const auto& name : { "pagealloc", "pagestore", "pagecompact" })
 	{
 		stageInfo.module = mResource.shaderModule.add(std::string("data/" ) + name + ".comp");
 
@@ -1932,4 +1837,67 @@ void Renderer::setTileCount()
 	int width, height;
     glfwGetFramebufferSize(mContext.getWindow(), &width, &height);
 	mTileCount = {(width - 1) / mCurrentTileSize + 1, (height - 1) / mCurrentTileSize + 1};
+}
+
+GBuffer Renderer::generateGBuffer()
+{
+	GBuffer buffer;
+
+	// depth buffer
+	{
+		auto formatCandidates = { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint };
+		auto depthFormat = mUtility.findSupportedFormat(formatCandidates, vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment);
+
+		// for depth pre pass and output as texture
+		buffer.depth = mUtility.createImage(
+			mSwapchainExtent.width, mSwapchainExtent.height,
+			depthFormat,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		buffer.depth.view = mUtility.createImageView(*buffer.depth.handle, depthFormat, vk::ImageAspectFlagBits::eDepth);
+	}
+
+	// position
+	{
+		buffer.position = mUtility.createImage(
+			mSwapchainExtent.width, mSwapchainExtent.height,
+			vk::Format::eR16G16B16A16Sfloat,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		buffer.position.view = mUtility.createImageView(*buffer.position.handle, buffer.position.format, vk::ImageAspectFlagBits::eColor);
+	}
+
+	// color
+	{
+		buffer.color = mUtility.createImage(
+			mSwapchainExtent.width, mSwapchainExtent.height,
+			vk::Format::eR8G8B8A8Unorm,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		buffer.color.view = mUtility.createImageView(*buffer.color.handle, buffer.color.format, vk::ImageAspectFlagBits::eColor);
+	}
+
+	// normal
+	{
+		buffer.normal = mUtility.createImage(
+			mSwapchainExtent.width, mSwapchainExtent.height,
+			vk::Format::eR16G16Sfloat,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		buffer.normal.view = mUtility.createImageView(*buffer.normal.handle, buffer.normal.format, vk::ImageAspectFlagBits::eColor);
+	}
+
+	return buffer;
 }

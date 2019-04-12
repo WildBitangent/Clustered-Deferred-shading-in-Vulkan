@@ -38,6 +38,7 @@ private:
 	void createClusteredBuffers();
 	void createLights();
 	void createDescriptorPool();
+	void createDescriptorSets();
 	void updateDescriptorSets();
 	void createGraphicsCommandBuffers();
 	void createSyncPrimitives();
@@ -49,10 +50,10 @@ private:
 	void drawFrame();
 
 	void submitLightCullingCmds(size_t imageIndex);
-
 	void submitLightSortingCmds(size_t imageIndex);
 
 	void setTileCount();
+	GBuffer generateGBuffer();
 
 private:
 	Context mContext;
@@ -75,7 +76,7 @@ private:
 	GBuffer mGBufferAttachments;
 	vk::UniqueSampler mSampler;
 	vk::UniqueRenderPass mGBufferRenderpass;
-	vk::UniqueFramebuffer mGBufferFramebuffer; // todo multiple, fix ping pong
+	vk::UniqueFramebuffer mGBufferFramebuffer;
 
 	// composition
 	vk::UniqueRenderPass mCompositionRenderpass;

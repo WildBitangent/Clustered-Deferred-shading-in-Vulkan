@@ -67,10 +67,10 @@ namespace resource
 		vk::DescriptorSetLayout add(const std::string& key, vk::DescriptorSetLayoutCreateInfo& createInfo);
 	};
 
-	class DescriptorSet : public Base<vk::UniqueDescriptorSet, vk::DescriptorSet>
+	class DescriptorSet : public BaseVector<vk::UniqueDescriptorSet, vk::DescriptorSet>
 	{
 	public:
-		explicit DescriptorSet(const vk::Device device) : Base(device) {}
+		explicit DescriptorSet(const vk::Device device) : BaseVector(device) {}
 		
 		vk::DescriptorSet add(const std::string& key, vk::DescriptorSetAllocateInfo allocInfo);
 	};
