@@ -233,6 +233,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\Camera.cpp" />
     <ClCompile Include="src\Context.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
@@ -251,6 +252,7 @@
       </ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="src\Resource.cpp" />
+    <ClCompile Include="src\Scene.cpp" />
     <ClCompile Include="src\ThreadPool.cpp" />
     <ClCompile Include="src\UI.cpp" />
     <ClCompile Include="src\Util.cpp">
@@ -260,11 +262,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\BaseApp.h" />
+    <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\Context.h" />
     <ClInclude Include="src\lodepng.h" />
     <ClInclude Include="src\Model.h" />
     <ClInclude Include="src\Renderer.h" />
     <ClInclude Include="src\Resource.h" />
+    <ClInclude Include="src\Scene.h" />
     <ClInclude Include="src\ThreadPool.h" />
     <ClInclude Include="src\tiny_obj_loader.h" />
     <ClInclude Include="src\UI.h" />

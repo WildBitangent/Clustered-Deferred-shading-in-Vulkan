@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include "Util.h"
+#include "Scene.h"
 
 struct GLFWwindow;
 class Renderer;
@@ -25,12 +26,15 @@ public:
 		DebugStates debugState = DebugStates::disabled;
 		bool debugUniformDirtyBit = false;
 		bool shaderReloadDirtyBit = false;
+		bool sceneReload = false;
 
-		glm::vec3 lightBoundMin = {-31, -5.5, -37.5};
-		glm::vec3 lightBoundMax = {18.5, 15.5, 16};
+		glm::vec3 lightBoundMin;
+		glm::vec3 lightBoundMax;
 		int lightsCount = 32768;
+		float lightSpeed = 0.f;
 		int tileSize = 1;
-		bool lightsAnimation = false;
+		int currentScene = 0;
+		// bool lightsAnimation = false;
 		bool vSync = true;
 	} mContext;
 

@@ -4,7 +4,7 @@
 
 // #define TILE_SIZE 32 // TODO bake it with compilation or w/e
 #define PAGE_SIZE 512
-#define NEAR 0.5
+#define NEAR 0.01
 #define FAR 100.0
 // #define Y_SLICES 0.083381608939051058394765834642179160608822393696599701826
 

@@ -44,7 +44,7 @@ void main()
 	float specular = 0.0;
 	vec3 normalTex = vec3(0.5, 0.5, 1.0);
 	
-	outColor = vec4(1.0, 0.078, 0.576, 1.0);
+	outColor = vec4(color, 1.0);
 
 	if (material.hasAlbedoMap > 0)
 		outColor = texture(albedoSampler, texCoord);

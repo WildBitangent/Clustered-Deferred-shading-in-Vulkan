@@ -38,8 +38,29 @@ void UI::update()
 	{
 		Text("%.3f ms/frame (%.1f FPS)", 1000.0f / GetIO().Framerate, GetIO().Framerate);
 
-		Checkbox("Light animation", &mContext.lightsAnimation);
+		DragInt("Number of lights", &mContext.lightsCount, 10, 1, MAX_LIGHTS);
+		
+		// v_max doesn't work properly, make sure it doesn't exceed
+		if (mContext.lightsCount > MAX_LIGHTS) mContext.lightsCount = MAX_LIGHTS;
+		
+		DragFloat("Lights speed", &mContext.lightSpeed, 0.1f, 0.f, 20.f);
+		
+		const char* options[] = { "16x16", "32x32", "64x64" };
+		if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
+			mContext.shaderReloadDirtyBit = true;
+
 		Checkbox("V-Sync", &mContext.vSync);
+
+		if (Combo("Current scene", &mContext.currentScene, SceneConfigurations::nameGetter, nullptr, SceneConfigurations::data.size()))
+			mContext.sceneReload = true;
+
+		if (TreeNode("Light extents"))
+		{
+			DragFloat3("Min", reinterpret_cast<float*>(&mContext.lightBoundMin), 0.25);
+			DragFloat3("Max", reinterpret_cast<float*>(&mContext.lightBoundMax), 0.25);
+
+			TreePop();
+		}
 
 		if (TreeNode("Render texture"))
 		{
@@ -53,28 +74,6 @@ void UI::update()
 					mContext.debugUniformDirtyBit = true;
 				}
 			}
-			TreePop();
-		}
-
-		if (TreeNode("Tile settings"))
-		{
-			DragInt("Number of lights", &mContext.lightsCount, 10, 1, MAX_LIGHTS);
-
-			// v_max doesn't work properly, make sure it doesn't exceed
-			if (mContext.lightsCount > MAX_LIGHTS) mContext.lightsCount = MAX_LIGHTS;
-
-			const char* options[] = { "16x16", "32x32", "64x64" };
-			if (Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
-				mContext.shaderReloadDirtyBit = true;
-
-			TreePop();
-		}
-
-		if (TreeNode("Light extents"))
-		{
-			DragFloat3("Min", reinterpret_cast<float*>(&mContext.lightBoundMin), 0.25);
-			DragFloat3("Max", reinterpret_cast<float*>(&mContext.lightBoundMax), 0.25);
-
 			TreePop();
 		}
 	}

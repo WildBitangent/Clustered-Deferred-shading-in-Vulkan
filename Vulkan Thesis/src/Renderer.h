@@ -6,21 +6,22 @@
 #include "Model.h"
 #include "Resource.h"
 
+class Scene;
 struct GLFWwindow;
 struct PointLight;
 
 class Renderer
 {
 public:
-	Renderer(GLFWwindow* window, ThreadPool& pool); // todo move thread pool to utility when it's singleton
-
+	Renderer(GLFWwindow* window, Scene& scene); // todo move thread pool to utility when it's singleton
+	
+	void draw();
 	void resize();
-	void requestDraw(float deltatime);
 	void cleanUp();
 
-	void setCamera(const glm::mat4& view, const glm::vec3 campos);
 	void updateLights(const std::vector<PointLight>& lights); 
 	void reloadShaders(size_t size);
+	void onSceneChange();
 
 private:
 	void recreateSwapChain();
@@ -58,7 +59,7 @@ private:
 private:
 	Context mContext;
 	Utility mUtility;
-	Model mModel;
+	Scene& mScene;
 	vk::UniqueDescriptorPool mDescriptorPool;
 	resource::Resources mResource;
 
@@ -123,5 +124,6 @@ private:
 	std::vector<std::pair<uint32_t, uint32_t>> mLevelParam;
 
 	friend class UI;
+	friend class Scene;
 };
 

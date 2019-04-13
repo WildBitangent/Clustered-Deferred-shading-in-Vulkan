@@ -62,11 +62,6 @@ namespace util
 		size_t hash() const;
 	};
 
-	inline bool isNearlyEqual(float a, float b, float tolerance = 1e-8f)
-	{
-		return glm::abs(a - b) <= tolerance;
-	}
-
 	namespace init
 	{
 		// vk::WriteDescriptorSet writeDescriptorSet(vk::DescriptorSet target, )

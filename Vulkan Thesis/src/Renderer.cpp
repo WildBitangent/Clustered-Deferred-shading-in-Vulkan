@@ -32,9 +32,10 @@ struct DebugUBO
 	uint32_t debugState = 0;
 };
 
-Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
+Renderer::Renderer(GLFWwindow* window, Scene& scene)
 	: mContext(window)
 	, mUtility(mContext)
+	, mScene(scene)
 	, mResource(mContext.getDevice())
 {
 	vk::PhysicalDeviceSubgroupProperties subgroupProperties;
@@ -61,11 +62,9 @@ Renderer::Renderer(GLFWwindow* window, ThreadPool& pool)
 	createClusteredBuffers();
 	createLights();
 	createDescriptorPool();
-	// mModel.loadModel(mContext, "data/models/sponza.obj", *mSampler, *mDescriptorPool, mResource, pool);
-	mModel.loadModel(mContext, "data/models/dust2/de_dust2.obj", *mSampler, *mDescriptorPool, mResource, pool);
 	createDescriptorSets();
 	updateDescriptorSets();
-	createGraphicsCommandBuffers();
+	// createGraphicsCommandBuffers();
 	createComputeCommandBuffer();
 	createSyncPrimitives();
 }
@@ -75,9 +74,9 @@ void Renderer::resize()
 	recreateSwapChain();
 }
 
-void Renderer::requestDraw(float deltatime)
+void Renderer::draw()
 {
-	updateUniformBuffers(/*deltatime*/);
+	updateUniformBuffers();
 	submitLightSortingCmds(mCurrentFrame);
 	drawFrame();
 }
@@ -85,23 +84,6 @@ void Renderer::requestDraw(float deltatime)
 void Renderer::cleanUp()
 {
 	mContext.getDevice().waitIdle(); // finish everything before destroying
-}
-
-void Renderer::setCamera(const glm::mat4& view, const glm::vec3 campos)
-{
-	// update camera ubo
-	{
-		auto data = reinterpret_cast<CameraUBO*>(mContext.getDevice().mapMemory(*mCameraStagingBuffer.memory, 0, sizeof(CameraUBO)));
-		data->view = view;
-		data->projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.5f, 100.0f);
-		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
-		data->invProj = glm::inverse(data->projection);
-		data->cameraPosition = campos;
-		data->screenSize = {mSwapchainExtent.width, mSwapchainExtent.height};
-
-		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
-		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
-	}
 }
 
 void Renderer::reloadShaders(size_t size)
@@ -115,6 +97,19 @@ void Renderer::reloadShaders(size_t size)
 	createGraphicsCommandBuffers();
 	createComputePipeline();
 	createComputeCommandBuffer();
+}
+
+void Renderer::onSceneChange()
+{
+	createGraphicsCommandBuffers();
+
+	// update scale
+	{ 
+		auto data = static_cast<ObjectUBO*>(mContext.getDevice().mapMemory(*mObjectStagingBuffer.memory, 0, sizeof(ObjectUBO), {}));
+		data->model = glm::scale(glm::mat4(1.f), mScene.getScale()); 
+		mContext.getDevice().unmapMemory(*mObjectStagingBuffer.memory);
+		mUtility.copyBuffer(*mObjectStagingBuffer.handle, *mObjectUniformBuffer.handle, sizeof(ObjectUBO));
+	}
 }
 
 void Renderer::recreateSwapChain()
@@ -888,17 +883,6 @@ void Renderer::createUniformBuffers()
 		);
 	}
 
-	// Adding data to scene object buffer
-	{ 
-		ObjectUBO ubo;
-		ubo.model = glm::scale(glm::mat4(1.f), glm::vec3(0.01f)); 
-
-		auto data = mContext.getDevice().mapMemory(*mObjectStagingBuffer.memory, 0, sizeof(ubo), {});
-		memcpy(data, &ubo, sizeof(ubo));
-		mContext.getDevice().unmapMemory(*mObjectStagingBuffer.memory);
-		mUtility.copyBuffer(*mObjectStagingBuffer.handle, *mObjectUniformBuffer.handle, sizeof(ubo));
-	}
-
 	// camera 
 	{
 		vk::DeviceSize bufferSize = sizeof(CameraUBO);
@@ -1186,7 +1170,7 @@ void Renderer::createGraphicsCommandBuffers()
 		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("gbuffers"));
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSets, nullptr);
 
-		for (const auto& part : mModel.getMeshParts())
+		for (const auto& part : mScene.getGeometry())
 		{
 			auto materialSet = mResource.descriptorSet.get(part.materialDescriptorSetKey);
 
@@ -1431,6 +1415,20 @@ void Renderer::createComputeCommandBuffer()
 
 void Renderer::updateUniformBuffers()
 {
+	// update camera ubo
+	{
+		auto data = reinterpret_cast<CameraUBO*>(mContext.getDevice().mapMemory(*mCameraStagingBuffer.memory, 0, sizeof(CameraUBO)));
+		data->view = mScene.getCamera().getViewMatrix();
+		data->projection = glm::perspective(glm::radians(45.0f), mSwapchainExtent.width / static_cast<float>(mSwapchainExtent.height), 0.01f, 100.0f);
+		data->projection[1][1] *= -1; //since the Y axis of Vulkan NDC points down
+		data->invProj = glm::inverse(data->projection);
+		data->cameraPosition = mScene.getCamera().getPosition();
+		data->screenSize = {mSwapchainExtent.width, mSwapchainExtent.height};
+
+		mContext.getDevice().unmapMemory(*mCameraStagingBuffer.memory);
+		mUtility.copyBuffer(*mCameraStagingBuffer.handle, *mCameraUniformBuffer.handle, sizeof(CameraUBO));
+	}
+
 	// update debug buffer, if dirty bit is set
 	if (BaseApp::getInstance().getUI().debugStateUniformNeedsUpdate())
 	{

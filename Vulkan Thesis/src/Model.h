@@ -17,7 +17,7 @@ struct MeshPart
 
 	std::string materialDescriptorSetKey = "material.";
 
-	vk::ImageView albedoMap; // Should be just references // TODO refactor
+	vk::ImageView albedoMap;
 	vk::ImageView normalMap;
 	vk::ImageView specularMap;
 
@@ -26,7 +26,8 @@ struct MeshPart
 	bool hasSpecular = false;
 
 	uint32_t indexCount = 0;
-
+	
+	MeshPart() = default;
 	MeshPart(const BufferSection& vertex, const BufferSection& index, uint32_t indexCount)
 		: vertexBufferSection(vertex)
 		, indexBufferSection(index)
@@ -54,7 +55,7 @@ struct WorkerStruct
 	uint8_t* data;
 
 	BufferParameters stagingBuffer;
-	std::mutex mutex;
+	std::atomic<size_t> partIndexCounter = 0;
 	std::atomic<vk::DeviceSize> stagingBufferOffset = 0;
 	std::atomic<vk::DeviceSize> VIBufferOffset = 0;
 };
@@ -71,12 +72,13 @@ public:
 	Model& operator=(Model&& model) = default;
 
 	void loadModel(Context& context, const std::string& path, const vk::Sampler& textureSampler,
-		const vk::DescriptorPool& descriptorPool, resource::Resources& resources, ThreadPool& pool); // TODO: refactor
+		const vk::DescriptorPool& descriptorPool, resource::Resources& resources, ThreadPool& pool);
 
 	const std::vector<MeshPart>& getMeshParts() const;
 
 private:
-	void threadWork(size_t threadID, WorkerStruct& work);
+	void threadLoadData(size_t threadID, WorkerStruct& work);
+	void threadLoadImages(size_t threadID, WorkerStruct& work);
 	
 private:
 	std::vector<MeshPart> mParts;
@@ -84,5 +86,5 @@ private:
 	BufferParameters mBuffer;
 	BufferParameters mUniformBuffer;
 
-	std::vector<ImageParameters> mImages;
+	std::unordered_map<std::string, ImageParameters> mImageAtlas;
 };

@@ -115,7 +115,7 @@ namespace
 		if (std::ifstream cacheFile((folder / fs::path(path).stem()).concat(".asd"), std::ios::binary); cacheFile.is_open())
 			return readCacheModelData(cacheFile);
 
-		// Cache file not found //TODO header into cache
+		// Cache file not found
 		tinyobj::attrib_t attrib;
 		std::vector<tinyobj::shape_t> shapes;
 		std::vector<tinyobj::material_t> materials;
@@ -249,13 +249,17 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 	Utility utility(context);
 
 	// load proxy texture
-	mImages.emplace_back(utility.loadImageFromMemory({ 0, 0, 0, 0 }, 1, 1)); 
+	mImageAtlas[""] = utility.loadImageFromMemory({ 0, 0, 0, 0 }, 1, 1);
 
 	auto groups = loadModelFromFile(path);
 
 	vk::DeviceSize bufferSize = 0;
 	for (const auto& group : groups)
 	{
+		mImageAtlas[group.albedoMapPath];
+		mImageAtlas[group.normalMapPath];
+		mImageAtlas[group.specularMapPath];
+
 		if (group.indices.size() <= 0)
 			continue;
 
@@ -271,8 +275,8 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 
 	WorkerStruct work(utility);
 	work.groups = std::move(groups);
-	work.stagingBuffer = utility.createBuffer( // TODO mb smaller with multiple submits
-		256 * 1024 * 1024, // 256 MB
+	work.stagingBuffer = utility.createBuffer(
+		512 * 1024 * 1024, // 1 GB
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
@@ -302,9 +306,15 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 	allocInfo.level = vk::CommandBufferLevel::ePrimary;
 	vk::UniqueCommandBuffer cmd = std::move(device.allocateCommandBuffersUnique(allocInfo)[0]);
 
-	// spawn workers and wait for finish
-	pool.addWorkMultiplex([this, &work](size_t id) { threadWork(id, work); });
+	// copy images
+	pool.addWorkMultiplex([this, &work](size_t id) { threadLoadImages(id, work); });
 	pool.wait();
+
+	// copy data
+	mParts.resize(work.groups.size());
+	pool.addWorkMultiplex([this, &work](size_t id) { threadLoadData(id, work); });
+	pool.wait();
+	mParts.resize(work.partIndexCounter);
 
 	// retrieve command buffers
 	std::vector<vk::CommandBuffer> cmdBuffers;
@@ -338,7 +348,7 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 	{
 		auto& part = mParts[i];
 
-		part.materialDescriptorSetKey += std::to_string(counter++); // TODO sigh, refactor this shit
+		part.materialDescriptorSetKey += std::to_string(counter++);
 		
 		vk::DescriptorSetAllocateInfo allocInfo;
 		allocInfo.descriptorPool = descriptorPool;
@@ -383,40 +393,20 @@ void Model::loadModel(Context& context, const std::string& path, const vk::Sampl
 	submitInfo.pCommandBuffers = &*cmd;
 
 	context.getGeneralQueue().submit(submitInfo, nullptr);
-	context.getGeneralQueue().waitIdle(); // todo mb use fences or semaphores? +1
+	context.getGeneralQueue().waitIdle();
 
 	device.updateDescriptorSets(descriptorWrites, {});
 
 	work.commandBuffers.clear();
 }
 
-void Model::threadWork(size_t threadID, WorkerStruct& work)
+void Model::threadLoadData(size_t threadID, WorkerStruct& work)
 {
 	auto cmd = *work.commandBuffers[threadID];
-	// begin cmd buffer
-	vk::CommandBufferInheritanceInfo inheritanceInfo;
 
-	vk::CommandBufferBeginInfo beginInfo;
-	beginInfo.pInheritanceInfo = &inheritanceInfo;
-	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-	cmd.begin(beginInfo);
-
-	while (true) // break condition below
+	for (size_t i = threadID; i < work.groups.size(); i += std::thread::hardware_concurrency()) 
 	{
-		MeshMaterialGroup group;
-
-		// get work item
-		{
-			std::lock_guard<std::mutex> lock(work.mutex);
-
-			if (!work.groups.empty())
-			{
-				group = std::move(work.groups.back());
-				work.groups.pop_back();
-			}
-			else // nothing to be done, finish
-				break;
-		}
+		MeshMaterialGroup& group = work.groups[i];
 		
 		if (group.indices.empty())
 			continue;
@@ -462,83 +452,83 @@ void Model::threadWork(size_t threadID, WorkerStruct& work)
 
 		MeshPart part(vertexBufferSection, indexBufferSection, group.indices.size());
 
-		auto loadImg = [&work, &cmd](const std::string& path)
-		{
-			// load img from file
-			unsigned width, height;
-			std::vector<unsigned char> pixels;
-
-			if (lodepng::decode(pixels, width, height, path))
-				throw std::runtime_error("Failed to load png file: " + path);
-
-			// copy it to the staging buffer // todo copy less
-			const auto startOffset = std::atomic_fetch_add(&work.stagingBufferOffset, pixels.size()); 
-			memcpy(work.data + startOffset, pixels.data(), pixels.size());
-
-			auto image = work.utility.createImage(
-				width, height,
-				vk::Format::eR8G8B8A8Unorm,
-				vk::ImageTiling::eOptimal,
-				vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-				vk::MemoryPropertyFlagBits::eDeviceLocal
-			);
-
-			work.utility.recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-			work.utility.recordCopyBuffer(cmd, *work.stagingBuffer.handle, *image.handle, width, height, startOffset);
-			work.utility.recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
-			
-			image.view = work.utility.createImageView(*image.handle, vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
-
-			return image;
-		};
-
 		if (!group.albedoMapPath.empty())
 		{
-			auto image = loadImg(group.albedoMapPath);
-
-			// lock for insterting to the mImages
-			std::lock_guard<std::mutex> lock(work.mutex);
-			
-			part.albedoMap = *image.view;
+			part.albedoMap = *mImageAtlas[group.albedoMapPath].view;
 			part.hasAlbedo = true;
-			mImages.emplace_back(std::move(image));
 		}
 		else
-			part.albedoMap = *mImages[0].view; // todo possibly sigseg on realloc?
+			part.albedoMap = *mImageAtlas[""].view;
 
 		if (!group.normalMapPath.empty())
 		{
-			auto image = loadImg(group.normalMapPath);
-
-			// lock for insterting to the mImages
-			std::lock_guard<std::mutex> lock(work.mutex);
-			
-			part.normalMap = *image.view;
+			part.normalMap = *mImageAtlas[group.normalMapPath].view;
 			part.hasNormal = true;
-			mImages.emplace_back(std::move(image));
 		}
 		else
-			part.normalMap = *mImages[0].view;
+			part.normalMap = *mImageAtlas[""].view;
 
 		if (!group.specularMapPath.empty())
 		{
-			auto image = loadImg(group.specularMapPath);
-
-			// lock for insterting to the mImages
-			std::lock_guard<std::mutex> lock(work.mutex);
-			
-			part.specularMap = *image.view;
+			part.specularMap = *mImageAtlas[group.specularMapPath].view;
 			part.hasSpecular = true;
-			mImages.emplace_back(std::move(image));
 		}
 		else
-			part.specularMap = *mImages[0].view;
+			part.specularMap = *mImageAtlas[""].view;
 		
-		std::lock_guard<std::mutex> lock(work.mutex);
-		mParts.emplace_back(part);
+		mParts[work.partIndexCounter++] = part;
 	}
 
 	cmd.end();
+}
+
+void Model::threadLoadImages(size_t threadID, WorkerStruct& work)
+{
+	auto cmd = *work.commandBuffers[threadID];
+	// begin cmd buffer
+	vk::CommandBufferInheritanceInfo inheritanceInfo;
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.pInheritanceInfo = &inheritanceInfo;
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	cmd.begin(beginInfo);
+
+	// load images
+	for (auto i = threadID; i < mImageAtlas.size(); i += std::thread::hardware_concurrency())
+	{
+		auto it = mImageAtlas.begin();
+		std::advance(it, i);
+
+		auto path = it->first;
+		if (path == "")	continue;
+
+		// load img from file
+		unsigned width, height;
+		std::vector<unsigned char> pixels;
+
+		if (lodepng::decode(pixels, width, height, path))
+			throw std::runtime_error("Failed to load png file: " + path);
+
+		// copy it to the staging buffer
+		const auto startOffset = std::atomic_fetch_add(&work.stagingBufferOffset, pixels.size()); 
+		memcpy(work.data + startOffset, pixels.data(), pixels.size());
+
+		auto image = work.utility.createImage(
+			width, height,
+			vk::Format::eR8G8B8A8Unorm,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		work.utility.recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+		work.utility.recordCopyBuffer(cmd, *work.stagingBuffer.handle, *image.handle, width, height, startOffset);
+		work.utility.recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+		
+		image.view = work.utility.createImageView(*image.handle, vk::Format::eR8G8B8A8Unorm, vk::ImageAspectFlagBits::eColor);
+
+		mImageAtlas[path] = std::move(image);
+	}
 }
 
 const std::vector<MeshPart>& Model::getMeshParts() const
