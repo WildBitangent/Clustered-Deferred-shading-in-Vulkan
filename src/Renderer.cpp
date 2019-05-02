@@ -1666,16 +1666,7 @@ void Renderer::submitClusteredCompositionCmds(size_t imageIndex)
 	renderpassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 	renderpassInfo.pClearValues = clearValues.data();
 
-	
-		vk::BufferMemoryBarrier asd;
-		asd.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-		asd.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-		asd.size = VK_WHOLE_SIZE;
-		asd.buffer = *mLightsBuffers.handle;
-
 	cmd.begin(vk::CommandBufferBeginInfo{});
-	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader, vk::DependencyFlagBits::eByRegion, nullptr, asd, nullptr);
-
 	cmd.beginRenderPass(renderpassInfo, vk::SubpassContents::eInline);
 	
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, mResource.pipeline.get("composition"));
