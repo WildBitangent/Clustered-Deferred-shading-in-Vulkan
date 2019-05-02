@@ -1,0 +1,149 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_control_flow_attributes : enable
+
+#define LOCAL_SIZE 256
+
+// ------------- STRUCTS -------------
+#include "structs.inl"
+
+// ------------- LAYOUTS -------------
+layout(set = 0, binding = 0) uniform CameraUBO
+{
+	mat4 view;
+	mat4 proj;
+	mat4 invProj;
+	vec3 position;
+	uvec2 screenSize;
+} camera;
+
+layout(std430, set = 1, binding = 0) buffer LightsIn
+{
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 2) buffer Swap
+{
+	Key data[];
+} swap;
+
+layout(std430, set = 1, binding = 7) buffer Splitters
+{
+	Key splitters[];
+};
+
+layout(push_constant) uniform pushConstants 
+{
+	uint lightCount;
+};
+
+shared uint mortons[LOCAL_SIZE * 4]; // 4 elements per thread
+shared uint indices[LOCAL_SIZE * 4];
+
+#include "sort_util.comp"
+
+#define SWAP(a, b, k1, k2) \
+	mortons[a] = k2; mortons[b] = k1; \
+	k1 = indices[a]; indices[a] = indices[b]; indices[b] = k1
+
+void bitonicWarp128(uint offset) 
+{
+	uint tid = gl_LocalInvocationIndex & 0x1F;
+
+	//phase 0 to log(128)-1
+	
+	for(uint i = 2; i < 128; i <<= 1)
+	{
+		uint iMultp = (tid / (i >> 1)) * (i << 1) + offset;
+
+		for(uint j = i >> 1; j > 0; j >>= 1)
+		{
+			uint jTid = tid & (j - 1);
+			uint jMultp = (tid & ((i >> 1) - 1)) / j;
+
+			uint index = jTid + jMultp * (j << 1) + iMultp;
+
+			uint key1 = mortons[index];
+			uint key2 = mortons[index + j];
+
+			if (key1 > key2)
+			{
+				SWAP(index, index + j, key1, key2);
+			}
+
+			index = index + i;
+			key1 = mortons[index];
+			key2 = mortons[index + j];
+
+			if (key1 < key2)
+			{
+				SWAP(index, index + j, key1, key2);
+			}
+		}
+	}
+
+	// //special case for the last phase
+
+	for(uint j = 64; j > 0; j >>= 1)
+	{
+		uint jTid = tid & (j - 1);
+		uint jMultp = tid / j;
+
+		uint index = jTid + jMultp * (j << 1) + offset;
+
+		uint key1 = mortons[index];
+		uint key2 = mortons[index + j];
+
+		if (key1 > key2)
+		{
+			SWAP(index, index + j, key1, key2);
+		}
+
+		index += (j == 64) ? 32 : 64;
+
+		key1 = mortons[index];
+		key2 = mortons[index + j];
+
+		if (key1 > key2)
+		{
+			SWAP(index, index + j, key1, key2);
+		}
+	}
+}
+
+layout(local_size_x = LOCAL_SIZE) in;
+void main()
+{
+	uint tid = gl_LocalInvocationIndex;
+
+	[[unroll]]
+	for (uint i = 0; i < 4; i++)
+	{
+		uint index = ((tid & ~0x1F) << 2) + (tid & 0x1F) + (i << 5);
+		uint offset = gl_WorkGroupID.x << 10;
+		if (offset + index < lightCount)
+		{
+			vec3 pos = (camera.view * vec4(lightsIn[offset + index].position, 1.0)).xyz;
+			uint morton = morton3D(pos);
+			
+			mortons[index] = morton;
+			lightsIn[offset + index].position = pos;
+			lightsIn[offset + index].mortonCode = morton;
+ 		}
+		else mortons[index] = ~0;
+		
+		indices[index] = offset + index;
+	}
+
+	bitonicWarp128((tid & ~0x1F) << 2);
+
+	[[unroll]]
+	for (uint i = 0; i < 4; i++)
+	{
+		uint index = ((tid & ~0x1F) << 2) + (tid & 0x1F) + (i << 5);
+		uint offset = gl_WorkGroupID.x << 10;
+		swap.data[index + offset].mortonCode = mortons[index];
+		swap.data[index + offset].lightIndex = indices[index];
+	}
+}

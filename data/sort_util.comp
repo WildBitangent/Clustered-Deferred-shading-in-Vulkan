@@ -1,0 +1,20 @@
+uint expandBits(uint v)
+{
+	v = (v * 0x00010001) & 0xFF0000FF;
+	v = (v * 0x00000101) & 0x0F00F00F;
+	v = (v * 0x00000011) & 0xC30C30C3;
+	v = (v * 0x00000005) & 0x49249249;
+	return v;
+}
+
+uint morton3D(vec3 pos)
+{
+	// normalize negative coords to 0-512
+	pos.x = min(max(pos.x + 512.0f, 0.0f), 1023.0f);
+	pos.y = min(max(pos.y + 512.0f, 0.0f), 1023.0f);
+	pos.z = min(max(pos.z + 512.0f, 0.0f), 1023.0f);
+	uint xx = expandBits(uint(pos.x));
+	uint yy = expandBits(uint(pos.y));
+	uint zz = expandBits(uint(pos.z));
+	return xx * 4 + yy * 2 + zz;
+}

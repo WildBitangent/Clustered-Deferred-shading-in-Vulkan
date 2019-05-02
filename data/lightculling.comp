@@ -1,0 +1,319 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
+
+layout (constant_id = 0) const uint TILE_SIZE = 0;
+layout (constant_id = 1) const float Y_SLICES = 0.0;
+
+// ------------- STRUCTS -------------
+#include "structs.inl"
+
+// ------------- LAYOUTS -------------
+layout(std430, set = 1, binding = 0) buffer readonly LightsIn
+{
+	Light lightsIn[];
+};
+
+layout(std430, set = 1, binding = 1) buffer writeonly LightsOut
+{
+	// uint lightsCount;
+	uint indirectCount;
+	uint lights[];
+} lightsOut;
+
+layout(std430, set = 1, binding = 2) buffer readonly BVH
+{
+	Node nodes[];
+} bvh;
+
+layout(std430, set = 1, binding = 2) buffer readonly Keys
+{
+	uint keys[];
+};
+
+layout(std430, set = 1, binding = 4) buffer readonly PageTable
+{
+	uint counter;
+	uint pad0; // pad for indirect dispatch
+	uint pad1;
+
+	uint nodes[];
+} table;
+
+layout(std430, set = 1, binding = 5) buffer writeonly PagePool
+{
+	uint data[];
+} pool;
+
+layout(std430, set = 1, binding = 6) buffer readonly CompactedClusters
+{
+	uint counter;
+	uint wgx;
+	uint wgy;
+	uint wgz; // todo move this somewhere
+	
+	uint data[];
+} comp;
+
+layout(push_constant) uniform pushConstants 
+{
+	int maxLevel;
+	LevelParam levelParam[5];
+};
+
+#include "page_utils.comp"
+
+shared uint lightIndices[4096];
+
+// ------------- VARIABLES -------------
+ViewFrustum createFrustum(uvec3 clusterID)
+{
+	ViewFrustum frustum;
+
+	float near = (1.0 / (exp(clusterID.z * Y_SLICES) * NEAR) - (1.0 / NEAR)) / ((1.0 / FAR) - (1.0 / NEAR));
+	float far = (1.0 / (exp((clusterID.z + 1) * Y_SLICES) * NEAR) - (1.0 / NEAR)) / ((1.0 / FAR) - (1.0 / NEAR));
+	
+	uvec2 tileCount = (camera.screenSize - 1) / TILE_SIZE + 1;
+	uvec2 tileID = clusterID.xy;
+	vec2 step = 2.0 * vec2(TILE_SIZE, TILE_SIZE) / vec2(tileCount * TILE_SIZE);
+
+	vec2 ndc[4];
+	ndc[0] = vec2(step * tileID - 1.0); // top left	
+	ndc[1] = vec2(ndc[0].x, ndc[0].y + step.y); // bottom left
+	ndc[2] = ndc[0] + step; // bottom right
+	ndc[3] = vec2(ndc[0].x + step.x, ndc[0].y); // top right
+
+	vec4 temp;
+	for (uint i = 0; i < 4; i++) 
+	{
+		temp = camera.invProj * vec4(ndc[i], near, 1.0);
+		frustum.point[i] = temp.xyz / temp.w;
+		temp = camera.invProj * vec4(ndc[i], far, 1.0);
+		frustum.point[i + 4] = temp.xyz / temp.w;
+	}
+
+	vec3 tempNormal;
+	for (uint i = 0; i < 4; i++)
+	{
+		tempNormal = normalize(cross(frustum.point[i], frustum.point[(i + 1)]));
+		frustum.plane[i] = vec4(tempNormal, dot(tempNormal, frustum.point[i]));
+	}
+
+	tempNormal = normalize(cross(frustum.point[1] - frustum.point[0], frustum.point[3] - frustum.point[0]));
+	frustum.plane[4] = vec4(tempNormal, dot(tempNormal, frustum.point[0]));
+
+	tempNormal = normalize(cross(frustum.point[7] - frustum.point[4], frustum.point[5] - frustum.point[4]));
+	frustum.plane[5] = vec4(tempNormal, dot(tempNormal, frustum.point[4]));
+
+	return frustum;
+}
+
+bool collideSphere(ViewFrustum frustum, vec3 position, float radius)
+{
+	for (uint i = 0; i < 6; i++)
+	{
+		float distance = dot(frustum.plane[i].xyz, position) - frustum.plane[i].w;
+
+		if (distance > radius)
+			return false;
+	}
+
+	return true;
+}
+
+bool collideAABB(ViewFrustum frustum, Node bbox)
+{
+	// 1. frustum to bbox
+	for (int i = 0; i < 6; i++) 
+	{
+		vec3 n;
+		n.x = (frustum.plane[i].x > 0) ? bbox.min.x : bbox.max.x;
+		n.y = (frustum.plane[i].y > 0) ? bbox.min.y : bbox.max.y;
+		n.z = (frustum.plane[i].z > 0) ? bbox.min.z : bbox.max.z;
+
+		if (dot(frustum.plane[i].xyz, n) > frustum.plane[i].w)
+			return false;
+	}
+
+	// 2. bbox to frustum
+	int probe;
+	probe = 0; for(int i = 0; i < 8; i++) probe += (frustum.point[i].x > bbox.max.x) ? 1 : 0; if (probe == 8) return false;
+	probe = 0; for(int i = 0; i < 8; i++) probe += (frustum.point[i].x < bbox.min.x) ? 1 : 0; if (probe == 8) return false;
+	probe = 0; for(int i = 0; i < 8; i++) probe += (frustum.point[i].y > bbox.max.y) ? 1 : 0; if (probe == 8) return false;
+	probe = 0; for(int i = 0; i < 8; i++) probe += (frustum.point[i].y < bbox.min.y) ? 1 : 0; if (probe == 8) return false;
+	probe = 0; for(int i = 0; i < 8; i++) probe += (frustum.point[i].z > bbox.max.z) ? 1 : 0; if (probe == 8) return false;
+	probe = 0; for(int i = 0; i < 8; i++) probe += (frustum.point[i].z < bbox.min.z) ? 1 : 0; if (probe == 8) return false;
+
+	// 3. edges to edges
+
+
+	return true;
+}
+
+void testLastLevelCollisions(ViewFrustum frustum, uint offset)
+{
+	uint lightIndex = keys[offset + gl_SubgroupInvocationID];
+	Light light = lightsIn[lightIndex];
+	
+	bool isCollided = collideSphere(frustum, light.position, light.radius);
+
+	// correct collisions out of bounds
+	if (gl_SubgroupInvocationID >= (levelParam[0].count - offset))
+		isCollided = false;
+
+	uvec4 collisions = subgroupBallot(isCollided);
+	uint index = subgroupBallotExclusiveBitCount(collisions);
+	uint numCollisions = subgroupBallotBitCount(collisions);
+
+	uint sharedMemoryOffset = (4096 / gl_NumSubgroups) * gl_SubgroupID;
+
+	// write to the shared mem
+		// if shared is full (192), write to the global
+		// shared[0] indirect counter
+		// shared[1] shared counter
+		// save to shared global index
+		// this allows 192 * 62 = 12096 lights per clusterID
+
+	uint globalIndirectCounter = lightIndices[sharedMemoryOffset];
+	uint sharedMemLightCounter = lightIndices[sharedMemoryOffset + 1];
+	if (lightIndices[sharedMemoryOffset + 1] + numCollisions > 192)
+	{
+		// fill whole shared memory
+		if (isCollided && sharedMemLightCounter + index < 192)
+			lightIndices[sharedMemoryOffset + sharedMemLightCounter + index + 64] = lightIndex;
+
+		uint indirectSharedIndex = lightIndices[sharedMemoryOffset] + 2;
+
+		// get next global mem offset, where will be shared mem written
+		if (subgroupElect())
+		{
+			uint globalOffset = (comp.wgx * gl_NumSubgroups << 6);
+			lightIndices[sharedMemoryOffset + indirectSharedIndex] = globalOffset + atomicAdd(lightsOut.indirectCount, 1) * 192;
+			lightIndices[sharedMemoryOffset]++;
+		}
+
+		// flush shared memory to global
+		uint globalOffset = lightIndices[sharedMemoryOffset + indirectSharedIndex];
+		for (uint i = gl_SubgroupInvocationID; i < 192; i += gl_SubgroupSize)
+			lightsOut.lights[globalOffset + i] = lightIndices[sharedMemoryOffset + i + 64];
+
+		// save lights which didn't fit into shared memory before
+		if (isCollided && sharedMemLightCounter + index >= 192)
+		{
+			uint ii = (sharedMemLightCounter + index) & 0x3F;
+			lightIndices[sharedMemoryOffset + ii + 64] = lightIndex;
+		}
+
+		// update shared counter
+		if(subgroupElect())
+			lightIndices[sharedMemoryOffset + 1] = (sharedMemLightCounter + numCollisions) & 0x3F;
+	}
+	else
+	{
+		if (isCollided)
+			lightIndices[sharedMemoryOffset + index + sharedMemLightCounter + 64] = lightIndex;
+
+		if (subgroupElect())
+			lightIndices[sharedMemoryOffset + 1] += numCollisions;
+	}
+}
+
+
+layout(local_size_x = 512) in;
+void main()
+{
+	uint index = gl_GlobalInvocationID.x / gl_SubgroupSize;
+	uint sharedMemoryOffset = (4096 / gl_NumSubgroups) * gl_SubgroupID;
+
+	// discard warps out of bounds
+	if (index > comp.counter)
+		return;
+
+	uint key = comp.data[index];
+	ViewFrustum frustum = createFrustum(uvec3(key & 0x7F, (key >> 7) & 0x7F, key >> 14));
+	int level = maxLevel;
+	uint offset = levelParam[maxLevel].offset;
+
+	// init counters
+	lightIndices[gl_SubgroupInvocationID + sharedMemoryOffset] = 0; 
+
+	if (maxLevel > 0)
+	{
+		uint currentLevel = maxLevel;
+		uint levelOffsets[5] = uint[](0, 0, 0, 0, 0);
+		uvec2 collisions[5];
+
+		// set start of recursion
+		Node node = bvh.nodes[levelParam[currentLevel].offset + gl_SubgroupInvocationID];
+		collisions[currentLevel] = subgroupBallot(collideAABB(frustum, node)).xy;
+				
+		while (true)
+		{
+			uint index = subgroupBallotFindLSB(uvec4(collisions[currentLevel], 0, 0));
+			if (index >= gl_SubgroupSize || index >= (levelParam[currentLevel].count - levelOffsets[currentLevel]))
+			{
+				if (currentLevel == maxLevel)
+					break;
+
+				currentLevel++;
+				continue;
+			}
+
+			// zero current index
+			if (index < 32) collisions[currentLevel].x &= ~(1 << index);
+			else collisions[currentLevel].y &= ~(1 << (index & ~0x20));
+
+			// set offset for next level
+			levelOffsets[currentLevel - 1] = (levelOffsets[currentLevel] + index) * gl_SubgroupSize;
+
+			if (currentLevel > 1)
+			{
+				currentLevel--;
+
+				// set collisions for next level
+				Node node = bvh.nodes[levelParam[currentLevel].offset + levelOffsets[currentLevel] + gl_SubgroupInvocationID];
+				collisions[currentLevel] = subgroupBallot(collideAABB(frustum, node)).xy;
+			}
+			else
+				testLastLevelCollisions(frustum, levelOffsets[0]);
+		}
+	}
+	else
+		testLastLevelCollisions(frustum, 0);
+
+	uint sharedMemLightCounter = lightIndices[sharedMemoryOffset + 1];
+
+	// write lights left in shared memory
+	if (sharedMemLightCounter > 0)
+	{
+		uint indirectSharedIndex = lightIndices[sharedMemoryOffset] + 2;
+
+		// get next global mem offset, where will be shared mem written
+		if (subgroupElect())
+		{
+			uint globalOffset = (comp.wgx * gl_NumSubgroups << 6);
+			lightIndices[sharedMemoryOffset + indirectSharedIndex] = globalOffset + atomicAdd(lightsOut.indirectCount, 1) * 192;
+			lightIndices[sharedMemoryOffset]++; // update indirect counter
+		}
+
+		// flush shared memory to global
+		uint globalOffset = lightIndices[sharedMemoryOffset + indirectSharedIndex];
+		for (uint i = gl_SubgroupInvocationID; i < sharedMemLightCounter; i += gl_SubgroupSize)
+			lightsOut.lights[globalOffset + i] = lightIndices[sharedMemoryOffset + 64 + i];
+	}
+
+	// if lights exactly fit into one list, update last count
+	if (sharedMemLightCounter == 0 && subgroupElect())
+		lightIndices[sharedMemoryOffset + 1] = 192;
+	
+
+	// flush indirection list to global memory
+	offset = index << 6; // offset for lights info
+	for (uint i = gl_SubgroupInvocationID; i < 64; i += gl_SubgroupSize)
+		lightsOut.lights[offset + i] = lightIndices[sharedMemoryOffset + i];
+
+	// save info about current cluster to the page
+	if (subgroupElect())
+		pool.data[addressTranslate(key)] = offset;
+}

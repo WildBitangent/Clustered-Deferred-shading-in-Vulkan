@@ -1,0 +1,71 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
+#extension GL_GOOGLE_include_directive : enable
+#extension GL_EXT_control_flow_attributes : enable
+
+layout(std430, set = 1, binding = 4) buffer readonly PageTable
+{
+	uint counter;
+	uint pad0; // pad for indirect dispatch
+	uint pad1;
+
+	uint nodes[];
+} table;
+
+layout(std430, set = 1, binding = 5) buffer PagePool
+{
+	uint data[];
+} pool;
+
+layout(std430, set = 1, binding = 6) buffer writeonly CompactedClusters
+{
+	uint counter;
+	uint wgx;
+	uint wgy;
+	uint wgz; // todo move this somewhere
+	
+	uint data[];
+} comp;
+
+layout(std430, set = 1, binding = 1) buffer writeonly LightsOut
+{
+	uint count;
+	uint lights[];
+} lightsOut;
+
+
+#include "page_utils.comp"
+
+layout(local_size_x = 1024) in;
+void main()
+{
+	[[unroll]]
+	for (uint i = 0; i < 4; i++)
+	{	
+		uint poolIndex = gl_WorkGroupID.x * PAGE_SIZE + i * 1024 + gl_LocalInvocationIndex;
+		uint cluster = pool.data[poolIndex];
+		bool predicate = cluster > 0;
+
+		uvec4 ballot = subgroupBallot(predicate);
+		uint offset = subgroupBallotExclusiveBitCount(ballot);
+		uint clusterCount = subgroupBallotBitCount(ballot);
+
+		uint globalOffset;
+		if (subgroupElect())
+		{
+			globalOffset = atomicAdd(comp.counter, clusterCount);
+			// update indirect dispatch value for light culling
+			atomicMax(comp.wgx, (globalOffset + clusterCount - 1) / (512 / gl_SubgroupSize) + 1);
+		}
+
+		globalOffset = subgroupBroadcastFirst(globalOffset) + offset;
+
+		// write to the global memory
+		if (predicate)
+		{
+			comp.data[globalOffset] = cluster;
+			pool.data[poolIndex] = globalOffset;
+		}
+	}
+}
