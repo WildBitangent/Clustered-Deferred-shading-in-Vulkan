@@ -1608,8 +1608,8 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 		vk::BufferMemoryBarrier barrier;
 		barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		barrier.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead;
-		barrier.size = 4;
-		barrier.offset = buffer;
+		barrier.size = VK_WHOLE_SIZE;
+		// barrier.offset = buffer;
 		barrier.buffer = *mLightsBuffers.handle;
 		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -1626,7 +1626,7 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 
 	cmd.end();
 	
-	std::vector<vk::PipelineStageFlags> waitStages = {vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer};
+	std::vector<vk::PipelineStageFlags> waitStages = {vk::PipelineStageFlagBits::eDrawIndirect, vk::PipelineStageFlagBits::eTopOfPipe};
 	std::vector<vk::Semaphore> waitSemaphores = { 
 		mResource.semaphore.get("gBufferFinished"), 
 		mResource.semaphore.get("lightSortingFinished")
@@ -1641,7 +1641,7 @@ mResource.descriptorSet.get(mLightBufferSwapUsed)
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &mResource.semaphore.get("lightCullingFinished");
 
-	mContext.getComputeQueue().submit(submitInfo, nullptr);
+	mContext.getGeneralQueue().submit(submitInfo, nullptr);
 }
 
 void Renderer::submitClusteredCompositionCmds(size_t imageIndex)
