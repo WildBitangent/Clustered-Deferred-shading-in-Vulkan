@@ -9,7 +9,7 @@ Implementation of clustered deferred shading using *Vulkan API*.
 
 I'm sure that code is not perfect, contains lot of bugs and some bad decisions were made. My goal was to learn *Vulkan API* and also learn as much as possible things from field of computer graphics. Everything was created from scratch, without any previous knowledge, in 5 months.
 
-Application was developed under Visual Studio IDE, and the development branch is [PingPong](/CaptainUnitaco/Clustered-Deferred-shading-in-Vulkan/tree/PingPong).
+Application was developed under Visual Studio IDE, and the development branch is [PingPong](https://github.com/CaptainUnitaco/Clustered-Deferred-shading-in-Vulkan/tree/PingPong).
 
 Special thanks to Ing. Tomáš Milet, for the amount of information he gave me through development.
 
