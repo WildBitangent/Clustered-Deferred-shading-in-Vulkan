@@ -1,4 +1,11 @@
-﻿#pragma once
+﻿/**
+ * @file 'Resource.h'
+ * @brief RAII handler of Vulkan resources
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
+#pragma once
 #include <string>
 #include <unordered_map>
 #include <vulkan/vulkan.hpp>
@@ -14,6 +21,11 @@ namespace resource
 		const T& get(const std::string& key) const
 		{
 			return *mData.at(key);
+		}
+
+		void clear()
+		{
+			mData.clear();
 		}
 
 	protected:
@@ -35,6 +47,11 @@ namespace resource
 		const std::vector<U>& getAll(const std::string& key) const
 		{
 			return mData.at(key);
+		}
+
+		void clear()
+		{
+			mData.clear();
 		}
 
 	protected:

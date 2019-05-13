@@ -35,7 +35,7 @@ layout(std430, set = 1, binding = 1) buffer writeonly LightsOut
 } lightsOut;
 
 
-#include "page_utils.comp"
+#include "pt_utils.comp"
 
 layout(local_size_x = 1024) in;
 void main()

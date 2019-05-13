@@ -1,4 +1,11 @@
-﻿#include "Resource.h"
+﻿/**
+ * @file 'Resource.cpp'
+ * @brief RAII handler of Vulkan resources
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
+#include "Resource.h"
 #include "Model.h"
 #include <iostream>
 

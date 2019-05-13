@@ -1,3 +1,10 @@
+/**
+ * @file 'ShaderResourceConfig.inl'
+ * @brief Configuration for shader compiler
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 const TBuiltInResource defaultTBuiltInResource = 
 {
     /* .MaxLights = */ 32,

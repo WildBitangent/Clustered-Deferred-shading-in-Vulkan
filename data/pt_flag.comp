@@ -18,12 +18,7 @@ layout(std430, set = 1, binding = 4) buffer PageTable
 	uint nodes[];
 } table;
 
-layout(std430, set = 1, binding = 5) buffer writeonly pagePool
-{
-	uint data[];
-} pool;
-
-#include "page_utils.comp"
+#include "pt_utils.comp"
 
 
 layout(local_size_x_id = 2, local_size_y_id = 2) in;
@@ -37,12 +32,9 @@ void main()
 		uvec2 tileID = gl_WorkGroupID.xy;
 		float depth = getViewDepth(texelFetch(samplerDepth, ivec2(gl_GlobalInvocationID.xy), 0).r);
 		uint k = uint(log(depth / NEAR) / Y_SLICES); 
-		uint key = packKey(uvec3(tileID, k));
-		// todo depth normalization?
 
-		uint address = addressTranslate(key);
-
-		pool.data[address] = key;
+		uint address = packKey(uvec3(tileID, k));
+		table.nodes[address >> PAGE_SIZE_POWER] = 1;
 	}
 	else
 	{
@@ -59,10 +51,9 @@ void main()
 
 				float depth = getViewDepth(texelFetch(samplerDepth, dimension, 0).r);
 				uint k = uint(log(depth / NEAR) / Y_SLICES); 
-				uint key = packKey(uvec3(tileID, k));
 
-				uint address = addressTranslate(key);
-				pool.data[address] = key;
+				uint address = packKey(uvec3(tileID, k));
+				table.nodes[address >> PAGE_SIZE_POWER] = 1;
 			}
 		}
 	}

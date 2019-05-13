@@ -1,3 +1,10 @@
+/**
+ * @file 'Model.cpp'
+ * @brief Model loading
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "Model.h"
 #include "Util.h"
 
@@ -36,9 +43,9 @@ namespace
 	};
 
 	template<typename... T>
-	void write4B(std::ofstream& file, const uint32_t& head, const T&... tail)
+	void write4B(std::ofstream& file, const size_t head, const T&... tail)
 	{
-		file.write(reinterpret_cast<const char*>(&head), sizeof(head));
+		file.write(reinterpret_cast<const char*>(&head), sizeof(uint32_t));
 		
 		if constexpr (sizeof...(tail) > 0)
 			write4B(file, tail...);
@@ -224,7 +231,7 @@ namespace
 				if (uniqueVertices.count(vertex) == 0)
 				{
 					vertex.tangent = glm::normalize(vertex.tangent);
-					uniqueVertices[vertex] = group.vertices.size(); // auto incrementing size
+					uniqueVertices[vertex] = static_cast<unsigned>(group.vertices.size()); // auto incrementing size
 					group.vertices.push_back(vertex);
 				}
 				group.indices.emplace_back(uniqueVertices[vertex]);
@@ -445,7 +452,7 @@ void Model::threadLoadData(size_t threadID, WorkerStruct& work)
 			);
 		}
 
-		MeshPart part(vertexBufferSection, indexBufferSection, group.indices.size());
+		MeshPart part(vertexBufferSection, indexBufferSection, static_cast<uint32_t>(group.indices.size()));
 
 		if (!group.albedoMapPath.empty())
 		{

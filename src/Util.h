@@ -1,3 +1,10 @@
+/**
+ * @file 'Util.h'
+ * @brief Utilities for Renderer
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #define GLM_ENABLE_EXPERIMENTAL
 
@@ -84,7 +91,7 @@ public:
 	vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities);
 	vk::Format findSupportedFormat(const std::vector<vk::Format>& formats, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
 
-	BufferParameters createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, vk::SharingMode sharingmode = vk::SharingMode::eExclusive);
+	BufferParameters createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp);
 	void copyBuffer(vk::Buffer src, vk::Buffer dst, vk::DeviceSize size, vk::DeviceSize srcOffset = 0, vk::DeviceSize dstOffset = 0);
 
 	ImageParameters createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memProperties);

@@ -3727,7 +3727,7 @@ unsigned lodepng_get_color_profile(LodePNGColorProfile* profile,
                                    const LodePNGColorMode* mode_in)
 {
   unsigned error = 0;
-  size_t i;
+  unsigned i;
   ColorTree tree;
   size_t numpixels = (size_t)w * (size_t)h;
 
@@ -4808,7 +4808,7 @@ static unsigned readChunk_iCCP(LodePNGInfo* info, const LodePNGDecompressSetting
                           (unsigned char*)(&data[string2_begin]),
                           length, zlibsettings);
   if(!error) {
-    info->iccp_profile_size = decoded.size;
+    info->iccp_profile_size = (unsigned)decoded.size;
     info->iccp_profile = (unsigned char*)lodepng_malloc(decoded.size);
     if(info->iccp_profile) {
       memcpy(info->iccp_profile, decoded.data, decoded.size);

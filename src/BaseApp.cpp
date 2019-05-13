@@ -1,3 +1,10 @@
+/**
+ * @file 'BaseApp.cpp'
+ * @brief Base for application
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "BaseApp.h"
 #include "Context.h"
 
@@ -27,7 +34,7 @@ void BaseApp::run()
 	while (!glfwWindowShouldClose(mWindow) && !glfwGetKey(mWindow, GLFW_KEY_ESCAPE))
 	{
 		current = std::chrono::high_resolution_clock::now();
-		const auto deltaTime = std::chrono::duration<double>(current - startTime).count();
+		const auto deltaTime = std::chrono::duration<float>(current - startTime).count();
 
 		// check vsync
 		if (deltaTime < 1.0 / 60.0 && mUI.mContext.vSync)
@@ -55,6 +62,7 @@ void BaseApp::run()
 		mUI.mContext.sceneReload = false;
 		mUI.mContext.shaderReloadDirtyBit = false;
 		mUI.mContext.cullingMethodChanged = false;
+		// mUI.mContext.windowSizeChanged = false;
 		
 		startTime = current;
 	}
@@ -107,21 +115,7 @@ GLFWwindow* BaseApp::createWindow()
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // no OpenGL context
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-	// const auto mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-	// glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-	// glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-	// glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-	// glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-	auto window = glfwCreateWindow(1920, 1080, "Clustered deferred shading in Vulkan", /*glfwGetPrimaryMonitor()*/nullptr, nullptr);
-	// auto window = glfwCreateWindow(mode->width, mode->height, "Clustered deferred shading in Vulkan", glfwGetPrimaryMonitor(), nullptr);
-	//
-
-	// auto resizeCallback = [](GLFWwindow* window, int width, int height)
-	// {
-	// 	// swapchain will be recreated automatically
-	// };
-
-	// glfwSetWindowSizeCallback(window, resizeCallback);
+	auto window = glfwCreateWindow(1920, 1080, "Clustered deferred shading in Vulkan", nullptr, nullptr);
 
 	return window;
 }
@@ -141,7 +135,7 @@ void BaseApp::updateLights(float dt)
 	auto randVec3 = []()
 	{
 		static thread_local std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
-		static thread_local std::minstd_rand generator(reinterpret_cast<unsigned>(&distribution)); // seed through random memory addres of distribution
+		static thread_local std::minstd_rand generator(static_cast<uint32_t>(reinterpret_cast<size_t>(&distribution))); // seed through random memory addres of distribution
 
 		return glm::vec3(distribution(generator), distribution(generator), distribution(generator));
 	};

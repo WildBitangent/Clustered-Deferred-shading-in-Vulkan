@@ -1,3 +1,10 @@
+/**
+ * @file 'Context.cpp'
+ * @brief Graphic context holder
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "Context.h"
 
 #include <GLFW/glfw3.h>
@@ -327,17 +334,17 @@ void Context::createLogicalDevice()
 		queueFamilies.emplace_back(mQueueFamilyIndices.generalFamily);
 
 		if (mQueueFamilyIndices.computeQueueIndex > 0)
-			queuePriorities.emplace_back(std::vector<float>{1.0, 1.0});
+			queuePriorities.emplace_back(std::vector<float>{1.0f, 1.0f});
 		else
-			queuePriorities.emplace_back(1.0);
+			queuePriorities.emplace_back(std::vector<float>{1.0f});
 	}
 	else
 	{
 		queueFamilies.emplace_back(mQueueFamilyIndices.generalFamily);
-		queuePriorities.emplace_back(1.0);
+		queuePriorities.emplace_back(std::vector<float>{1.0f});
 
 		queueFamilies.emplace_back(mQueueFamilyIndices.computeFamily);
-		queuePriorities.emplace_back(1.0);
+		queuePriorities.emplace_back(std::vector<float>{1.0f});
 	}
 		
 	for (size_t i = 0; i < queueFamilies.size(); i++)

@@ -1,3 +1,10 @@
+/**
+ * @file 'UI.h'
+ * @brief User interface handling
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include <string>
 #include "Util.h"
@@ -25,6 +32,14 @@ enum class CullingMethod : int
 	clustered,
 };
 
+enum class WindowSize : unsigned
+{
+	_1024x726,
+	_1920x1080,
+	_2048x1080,
+	_4096x2160,
+};
+
 class UI
 {
 public:
@@ -32,6 +47,7 @@ public:
 	{
 		DebugStates debugState = DebugStates::disabled;
 		CullingMethod cullingMethod = CullingMethod::clustered;
+		WindowSize windowSize = WindowSize::_1920x1080;
 		bool debugUniformDirtyBit = false;
 		bool shaderReloadDirtyBit = false;
 		bool sceneReload = false;
@@ -54,26 +70,21 @@ public:
 
 	void update();
 	void resize();
-	void copyDrawData(vk::CommandBuffer& cmd);
-	vk::CommandBuffer recordCommandBuffer(size_t cmdIndex);
-
-	BufferParameters& getVertexBuffer();
-	BufferParameters& getIndexBuffer();
+	void copyDrawData(vk::CommandBuffer cmd);
+	void recordCommandBuffer(vk::CommandBuffer cmd);
 
 private:
 	void setColorScheme();
 	void initResources();
 	void createPipeline();
+	void setWindowSize(WindowSize size);
 	
 private:
 	Renderer& mRenderer;
 
-	BufferParameters mVertexBuffer;
-	BufferParameters mIndexBuffer;
+	BufferParameters mDrawBuffer;
 	BufferParameters mStagingBuffer;
 
 	ImageParameters mFontTexture;
 	vk::UniqueSampler mSampler;
-
-	std::vector<vk::UniqueCommandBuffer> mCmdBuffers;
 };

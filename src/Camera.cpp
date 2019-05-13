@@ -1,3 +1,10 @@
+/**
+ * @file 'Camera.cpp'
+ * @brief Camera defintions
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "Camera.h"
 #include <GLFW/glfw3.h>
 
@@ -44,10 +51,10 @@ void Camera::update(float dt)
 	{
 		auto cursorDelta = (mCursorPos - mPrevCursorPos) / glm::vec2(glm::min(mExtent.x, mExtent.y) * 2.0f);
 	
-		if (!isNearlyEqual(cursorDelta.x, 0, 1e-5))
+		if (!isNearlyEqual(cursorDelta.x, 0, 1e-5f))
 			mRotation = glm::angleAxis(mRotationSpeed * -cursorDelta.x, glm::vec3(0.0f, 1.0f, 0.0f)) * mRotation;
 	
-		if (!isNearlyEqual(cursorDelta.y, 0, 1e-5))
+		if (!isNearlyEqual(cursorDelta.y, 0, 1e-5f))
 			mRotation = mRotation * glm::angleAxis(mRotationSpeed * -cursorDelta.y, glm::vec3(1.0f, 0.0f, 0.0f));
 	
 		mRotation = glm::normalize(mRotation);
