@@ -1,3 +1,10 @@
+/**
+ * @file 'Scene.cpp'
+ * @brief Scene class and confirugartions
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "Scene.h"
 #include "Renderer.h"
 
@@ -36,8 +43,8 @@ const std::vector<SceneConfig> SceneConfigurations::data =
 		{ 13.0f, 1.5f, -0.45f }, 
 		{ 0.68f, 0.0f, 0.72f, 0.0f },
 		glm::vec3(0.01f),
-		{-15.f, -15.f, -15.f},
-		{15.f, 15.f, 15.f}, // todo
+		{-25.f, -20.f, -25.f},
+		{25.f, 20.f, 25.f}, 
 	},
 	{
 		"San Miguel",
@@ -45,8 +52,8 @@ const std::vector<SceneConfig> SceneConfigurations::data =
 		{ 13.0f, 1.5f, -0.45f }, 
 		{ 0.68f, 0.0f, 0.72f, 0.0f },
 		glm::vec3(0.7f),
-		{-15.f, -15.f, -15.f},
-		{15.f, 15.f, 15.f}, // todo
+		{-25.f, -15.f, -25.f},
+		{40.f, 25.f, 25.f},
 	},
 	{
 		"Bridge",
@@ -54,17 +61,8 @@ const std::vector<SceneConfig> SceneConfigurations::data =
 		{ 13.0f, 1.5f, -0.45f }, 
 		{ 0.68f, 0.0f, 0.72f, 0.0f },
 		glm::vec3(1.0f),
-		{-15.f, -15.f, -15.f},
-		{15.f, 15.f, 15.f}, // todo
-	},
-	{
-		"dust2",
-		"data/models/dust2/de_dust2.obj",
-		{ 13.0f, 1.5f, -0.45f }, 
-		{ 0.68f, 0.0f, 0.72f, 0.0f },
-		glm::vec3(0.01f),
-		{-31, -5.5, -37.5},
-		{18.5, 15.5, 16},
+		{-20.f, -20.f, -20.f},
+		{20.f, 20.f, 20.f}, 
 	},
 	{
 		"Vokselia",
@@ -72,25 +70,16 @@ const std::vector<SceneConfig> SceneConfigurations::data =
 		{ 13.0f, 1.5f, -0.45f }, 
 		{ 0.68f, 0.0f, 0.72f, 0.0f },
 		glm::vec3(15.7f),
-		{-15.f, -15.f, -15.f},
-		{15.f, 15.f, 15.f}, // todo
+		{-35.f, -15.f, -35.f},
+		{35.f, 15.f, 35.f},
 	},
-	{ // todo transparency
+	{
 		"Sibenik",
 		"data/models/sibenik/sibenik.obj",
 		{ 13.0f, 1.5f, -0.45f }, 
 		{ 0.68f, 0.0f, 0.72f, 0.0f },
 		glm::vec3(1.0f),
-		{-15.f, -15.f, -15.f},
-		{15.f, 15.f, 15.f}, // todo
-	},
-	{
-		"Rungholt",
-		"data/models/rungholt/house.obj",
-		{ 13.0f, 1.5f, -0.45f }, 
-		{ 0.68f, 0.0f, 0.72f, 0.0f },
-		glm::vec3(0.7f),
-		{-15.f, -15.f, -15.f},
-		{15.f, 15.f, 15.f}, // todo
+		{-25.f, -15.f, -15.f},
+		{25.f, 20.f, 15.f}
 	},
 };

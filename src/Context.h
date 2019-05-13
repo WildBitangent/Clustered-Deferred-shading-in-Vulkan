@@ -1,6 +1,12 @@
+/**
+ * @file 'Context.h'
+ * @brief Graphic context holder
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include <vulkan/vulkan.hpp>
-#include "ThreadPool.h"
 
 
 struct GLFWwindow;

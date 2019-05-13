@@ -1,3 +1,10 @@
+/**
+ * @file 'BaseApp.h'
+ * @brief Base for application
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include "Context.h"
 #include "Renderer.h"

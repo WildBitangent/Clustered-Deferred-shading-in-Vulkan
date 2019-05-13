@@ -1,3 +1,10 @@
+/**
+ * @file 'Util.cpp'
+ * @brief Utilities for Renderer
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "Util.h"
 #include "Context.h"
 
@@ -176,7 +183,7 @@ std::vector<uint32_t> util::compileShader(const std::string& filename)
 	
 	spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
 	optimizer.SetMessageConsumer(msger);
-	// optimizer.RegisterPerformancePasses(); // todo turn on in final
+	optimizer.RegisterPerformancePasses(); // todo turn on in final
 	
 	if (!optimizer.Run(spirV.data(), spirV.size(), &spirV))
 		throw std::runtime_error("Failed to optimize SpirV program: " + filename);
@@ -270,17 +277,17 @@ vk::Format Utility::findSupportedFormat(const std::vector<vk::Format>& formats, 
 	for (const vk::Format& format : formats)
 	{
 		auto props = mContext.getPhysicalDevice().getFormatProperties(format);
-
-		if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features)
+		
+		if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features)
 			return format;
-		else if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features)
+		if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features)
 			return format;
 	}
 
 	throw std::runtime_error("Failed to find supported format");
 }
 
-BufferParameters Utility::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp, vk::SharingMode mode)
+BufferParameters Utility::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memProp)
 {
 	BufferParameters retObject;
 	retObject.size = size;
@@ -288,14 +295,7 @@ BufferParameters Utility::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags
 	vk::BufferCreateInfo bufferInfo;
 	bufferInfo.size = size;
 	bufferInfo.usage = usage;
-	// bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-	bufferInfo.sharingMode = mode;
-	std::array<uint32_t, 2> indices = {0, 1};
-	if (mode == vk::SharingMode::eConcurrent)
-	{
-		bufferInfo.queueFamilyIndexCount = 2;
-		bufferInfo.pQueueFamilyIndices = indices.data();	
-	}
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
 
 	retObject.handle = mContext.getDevice().createBufferUnique(bufferInfo);
 
@@ -415,7 +415,7 @@ ImageParameters Utility::loadImageFromMemory(std::vector<uint8_t> pixels, size_t
 	vkUnmapMemory(mContext.getDevice(), *stagingBuffer.memory);
 
 	auto image = createImage(
-		width, height,
+		static_cast<uint32_t>(width), static_cast<uint32_t>(height),
 		vk::Format::eR8G8B8A8Unorm,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
@@ -424,7 +424,7 @@ ImageParameters Utility::loadImageFromMemory(std::vector<uint8_t> pixels, size_t
 
 	auto cmd = beginSingleTimeCommands();
 	recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-	recordCopyBuffer(cmd, *stagingBuffer.handle, *image.handle, width, height);
+	recordCopyBuffer(cmd, *stagingBuffer.handle, *image.handle, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 	recordTransitImageLayout(cmd, *image.handle, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
 	endSingleTimeCommands(cmd);
 

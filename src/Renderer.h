@@ -1,3 +1,10 @@
+/**
+ * @file 'Renderer.h'
+ * @brief Vulkan renderer
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include <vector>
 
@@ -13,14 +20,13 @@ struct PointLight;
 class Renderer
 {
 public:
-	Renderer(GLFWwindow* window, Scene& scene); // todo move thread pool to utility when it's singleton
+	Renderer(GLFWwindow* window, Scene& scene);
 	
 	void draw();
-	void resize();
 	void cleanUp();
 
 	void updateLights(const std::vector<PointLight>& lights); 
-	void reloadShaders(size_t size);
+	void reloadShaders(uint32_t tileSize);
 	void onSceneChange();
 
 private:
@@ -102,12 +108,10 @@ private:
 	vk::DeviceSize mLightsOutOffset;
 	vk::DeviceSize mPointLightsOffset;
 	vk::DeviceSize mLightsOutSwapOffset;
-	vk::DeviceSize mSplittersOffset;
 
 	vk::DeviceSize mLightsOutSize;
 	vk::DeviceSize mPointLightsSize;
 	vk::DeviceSize mLightsOutSwap;
-	vk::DeviceSize mSplittersSize;
 
 	// Cluster buffer
 	BufferParameters mClusteredBuffer;
@@ -121,11 +125,11 @@ private:
 	
 	glm::uvec2 mTileCount;
 	uint32_t mLightsCount;
-	size_t mCurrentTileSize = 32;
-	size_t mSubGroupSize;
+	uint32_t mCurrentTileSize = 32;
+	uint32_t mSubGroupSize;
 	
 	// params for light culling created at light sorting
-	uint32_t mMaxLevel;
+	uint32_t mMaxBVHLevel;
 	std::string mLightBufferSwapUsed = "lightculling_01";
 	std::vector<std::pair<uint32_t, uint32_t>> mLevelParam;
 

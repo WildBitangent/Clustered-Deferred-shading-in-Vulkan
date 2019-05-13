@@ -1,3 +1,10 @@
+/**
+ * @file 'Camera.h'
+ * @brief Camera defintions
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include <unordered_map>
 #include <GLFW/glfw3.h>

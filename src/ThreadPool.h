@@ -1,3 +1,10 @@
+/**
+ * @file 'ThreadPool.h'
+ * @brief Implementation of thread pool design pattern
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include <thread>
 #include <vulkan/vulkan.hpp>

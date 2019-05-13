@@ -1,3 +1,10 @@
+/**
+ * @file 'Model.h'
+ * @brief Model loading
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include <vector>
 #include <vulkan/vulkan.hpp>
@@ -5,6 +12,7 @@
 #include "Context.h"
 #include "Util.h"
 #include "Resource.h"
+#include "ThreadPool.h"
 #include <queue>
 #include <mutex>
 #include <atomic>

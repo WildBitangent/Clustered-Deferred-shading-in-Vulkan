@@ -1,3 +1,10 @@
+/**
+ * @file 'main.cpp'
+ * @brief Entry point
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include <cstdlib>
 #include <iostream>
 

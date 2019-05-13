@@ -1,3 +1,10 @@
+/**
+ * @file 'UI.cpp'
+ * @brief User interface handling
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "UI.h"
 #include <GLFW/glfw3.h>
 #include "BaseApp.h"
@@ -48,9 +55,12 @@ void UI::update()
 		if (const char* options[] = { "16x16", "32x32", "64x64" }; Combo("Tile Size", &mContext.tileSize, options, IM_ARRAYSIZE(options)))
 			mContext.shaderReloadDirtyBit = true;
 
+		if (const char* options[] = { "1024x726", "1920x1080", "2048x1080", "4096x2160" }; Combo("Window Size", reinterpret_cast<int*>(&mContext.windowSize), options, IM_ARRAYSIZE(options)))
+			setWindowSize(mContext.windowSize);
+
 		Checkbox("V-Sync", &mContext.vSync);
 
-		if (Combo("Current scene", &mContext.currentScene, SceneConfigurations::nameGetter, nullptr, SceneConfigurations::data.size()))
+		if (Combo("Current scene", &mContext.currentScene, SceneConfigurations::nameGetter, nullptr, static_cast<int>(SceneConfigurations::data.size())))
 			mContext.sceneReload = true;
 
 		if (const char* options[] = { "Disabled culling (classic deferred)", "Tiled", "Clustered" }; Combo("Culling method", reinterpret_cast<int*>(&mContext.cullingMethod), options, IM_ARRAYSIZE(options)))
@@ -87,47 +97,41 @@ void UI::resize()
 	createPipeline();
 }
 
-void UI::copyDrawData(vk::CommandBuffer& cmd)
+void UI::copyDrawData(vk::CommandBuffer cmd)
 {
 	auto drawData = ImGui::GetDrawData();
 
+	auto vertexSize = drawData->TotalVtxCount * sizeof(ImDrawVert);
+	auto indexSize = drawData->TotalIdxCount * sizeof(ImDrawIdx);
+
 	auto vertexData = reinterpret_cast<ImDrawVert*>(mRenderer.mContext.getDevice().mapMemory(*mStagingBuffer.memory, 0, mStagingBuffer.size, {}));
-	auto indexData = reinterpret_cast<ImDrawIdx*>(vertexData);
-	
+	auto indexData = reinterpret_cast<ImDrawIdx*>(vertexData + drawData->TotalVtxCount);
+
 	for (size_t i = 0, dataCount = 0; i < drawData->CmdListsCount; i++)
 	{
 		auto& vertices = drawData->CmdLists[i]->VtxBuffer;
 		memcpy(vertexData + dataCount, vertices.Data, vertices.Size * sizeof(ImDrawVert));
 		dataCount += vertices.Size;
 	}
-	mRenderer.mUtility.copyBuffer(*mStagingBuffer.handle, *mVertexBuffer.handle, drawData->TotalVtxCount * sizeof(ImDrawVert), 0, 0);
-	
+
 	for (size_t i = 0, dataCount = 0; i < drawData->CmdListsCount; i++)
 	{
 		auto& indices = drawData->CmdLists[i]->IdxBuffer;
 		memcpy(indexData + dataCount, indices.Data, indices.Size * sizeof(ImDrawIdx));
 		dataCount += indices.Size;
 	}
-	mRenderer.mUtility.copyBuffer(*mStagingBuffer.handle, *mIndexBuffer.handle, drawData->TotalIdxCount * sizeof(ImDrawIdx), 0, 0);
 	
+	mRenderer.mUtility.recordCopyBuffer(cmd, *mStagingBuffer.handle, *mDrawBuffer.handle, vertexSize + indexSize, 0, 0);
 	mRenderer.mContext.getDevice().unmapMemory(*mStagingBuffer.memory);
 }
 
-vk::CommandBuffer UI::recordCommandBuffer(size_t cmdIndex)
+void UI::recordCommandBuffer(vk::CommandBuffer cmd)
 {
-	auto& cmd = *mCmdBuffers[cmdIndex];
-	auto& context = BaseApp::getInstance().getRenderer().mContext;
 	const auto drawData = ImGui::GetDrawData();
 
-	vk::CommandBufferInheritanceInfo inheritanceInfo;
-	inheritanceInfo.renderPass = *BaseApp::getInstance().getRenderer().mCompositionRenderpass;
-	inheritanceInfo.subpass = 1;
-
-	vk::CommandBufferBeginInfo beginInfo;
-	beginInfo.flags = vk::CommandBufferUsageFlagBits::eRenderPassContinue;
-	beginInfo.pInheritanceInfo = &inheritanceInfo;
-
 	auto& pipelineLayout = BaseApp::getInstance().getRenderer().mResource.pipelineLayout.get("UI");
+	auto& pipeline = BaseApp::getInstance().getRenderer().mResource.pipeline.get("UI");
+	auto& fontTexture = BaseApp::getInstance().getRenderer().mResource.descriptorSet.get("fontTexture");
 
 	float scale[2];
 	scale[0] = 2.0f / drawData->DisplaySize.x;
@@ -136,53 +140,29 @@ vk::CommandBuffer UI::recordCommandBuffer(size_t cmdIndex)
 	translate[0] = -1.0f - drawData->DisplayPos.x * scale[0];
 	translate[1] = -1.0f - drawData->DisplayPos.y * scale[1];
 
-	cmd.begin(beginInfo);
-	copyDrawData(cmd);
-
 	cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(float) * 2, scale);
 	cmd.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, sizeof(float) * 2, sizeof(float) * 2, translate);
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, BaseApp::getInstance().getRenderer().mResource.pipeline.get("UI"));
-	cmd.bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics,
-		pipelineLayout,
-		0,
-		BaseApp::getInstance().getRenderer().mResource.descriptorSet.get("fontTexture"),
-		nullptr
-	);
-	cmd.bindVertexBuffers(0, *mVertexBuffer.handle, { 0 });
-	cmd.bindIndexBuffer(*mIndexBuffer.handle, 0, vk::IndexType::eUint32);
-	
-	size_t vertexOffset = 0;
-	size_t indexOffset = 0;
-	for (size_t i = 0; i < drawData->CmdListsCount; i++)
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, fontTexture, nullptr);
+	cmd.bindVertexBuffers(0, *mDrawBuffer.handle, { 0 });
+	cmd.bindIndexBuffer(*mDrawBuffer.handle, drawData->TotalVtxCount * sizeof(ImDrawVert), vk::IndexType::eUint32);
+
+	size_t vertexOffset = 0, indexOffset = 0;
+	for (int i = 0; i < drawData->CmdListsCount; i++)
 	{
 		const auto cmdList = drawData->CmdLists[i];
-		for (size_t n = 0; n < cmdList->CmdBuffer.Size; n++)
+		for (int n = 0; n < cmdList->CmdBuffer.Size; n++)
 		{
 			const auto pcmd = &cmdList->CmdBuffer[n];
 			if (pcmd->UserCallback)
 				pcmd->UserCallback(cmdList, pcmd);
 			else
-				vkCmdDrawIndexed(cmd, pcmd->ElemCount, 1, indexOffset, vertexOffset, 0);
+				vkCmdDrawIndexed(cmd, pcmd->ElemCount, 1, static_cast<uint32_t>(indexOffset), static_cast<int32_t>(vertexOffset), 0);
 
 			indexOffset += pcmd->ElemCount;
 		}
 		vertexOffset += cmdList->VtxBuffer.Size;
 	}
-
-	cmd.end();
-
-	return cmd;
-}
-
-BufferParameters& UI::getVertexBuffer()
-{
-	return mVertexBuffer;
-}
-
-BufferParameters& UI::getIndexBuffer()
-{
-	return mIndexBuffer;
 }
 
 void UI::setColorScheme()
@@ -208,32 +188,19 @@ void UI::setColorScheme()
 
 void UI::initResources()
 {
+	auto size = 10'000 * sizeof(ImDrawVert) + 10'000 * sizeof(ImDrawIdx);
 	// alloc buffers
-	mVertexBuffer = mRenderer.mUtility.createBuffer(
-		10'000 * sizeof(ImDrawVert),
-		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
-		vk::MemoryPropertyFlagBits::eDeviceLocal
-	);
-
-	mIndexBuffer = mRenderer.mUtility.createBuffer(
-		10'000 * sizeof(ImDrawIdx),
-		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+	mDrawBuffer = mRenderer.mUtility.createBuffer(
+		size,
+		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 
 	mStagingBuffer = mRenderer.mUtility.createBuffer(
-		50'000 * 4,
+		size,
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
-
-	// alloc cmd buffers
-	vk::CommandBufferAllocateInfo cmdAllocInfo;
-	cmdAllocInfo.commandPool = mRenderer.mContext.getDynamicCommandPool();
-	cmdAllocInfo.level = vk::CommandBufferLevel::eSecondary;
-	cmdAllocInfo.commandBufferCount = 2;
-
-	mCmdBuffers = mRenderer.mContext.getDevice().allocateCommandBuffersUnique(cmdAllocInfo);
 
 	auto& io = ImGui::GetIO();
 
@@ -397,7 +364,7 @@ void UI::createPipeline()
 	vk::PipelineVertexInputStateCreateInfo vertexInfo;
 	vertexInfo.vertexBindingDescriptionCount = 1;
 	vertexInfo.pVertexBindingDescriptions = &vertexBinding;
-	vertexInfo.vertexAttributeDescriptionCount = attribDesc.size();
+	vertexInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribDesc.size());
 	vertexInfo.pVertexAttributeDescriptions = attribDesc.data();
 
 	// depth and stencil
@@ -452,4 +419,19 @@ void UI::createPipeline()
 	pipelineInfo.basePipelineIndex = -1;
 
 	mRenderer.mResource.pipeline.add("UI", *mRenderer.mPipelineCache, pipelineInfo);
+}
+
+void UI::setWindowSize(WindowSize size)
+{
+	glm::ivec2 resolution;
+
+	switch (size)
+	{
+	case WindowSize::_1024x726: resolution = { 1024, 726 }; break;
+	case WindowSize::_1920x1080: resolution = { 1920, 1080 }; break;
+	case WindowSize::_2048x1080: resolution = { 2048, 1080 }; break;
+	case WindowSize::_4096x2160: resolution = { 4096, 2160 }; break;
+	}
+	
+	glfwSetWindowSize(mRenderer.mContext.getWindow(), resolution.x, resolution.y);
 }

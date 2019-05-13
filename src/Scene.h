@@ -1,6 +1,14 @@
+/**
+ * @file 'Scene.h'
+ * @brief Scene class and confirugartions
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #pragma once
 #include "Model.h"
 #include "Camera.h"
+#include "ThreadPool.h"
 
 class Renderer;
 

@@ -62,6 +62,6 @@ void main()
 
 	mat3 TBN = mat3(T, B, N);
 
-	outNormal = float32x3_to_oct(TBN * normalize(normalTex * 2.0 - 1.0)); // todo maybe should not be normalized
+	outNormal = float32x3_to_oct(TBN * normalize(normalTex * 2.0 - 1.0));
 	outPosition = vec4(worldPos, specular);
 }

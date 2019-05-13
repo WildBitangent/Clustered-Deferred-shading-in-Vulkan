@@ -1,3 +1,10 @@
+/**
+ * @file 'ThreadPool.cpp'
+ * @brief Implementation of thread pool design pattern
+ * @copyright The MIT license 
+ * @author Matej Karas
+ */
+
 #include "ThreadPool.h"
 
 Thread::Thread(size_t id)

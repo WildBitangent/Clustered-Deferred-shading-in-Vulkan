@@ -62,9 +62,12 @@ layout(push_constant) uniform pushConstants
 	LevelParam levelParam[5];
 };
 
-#include "page_utils.comp"
+#include "pt_utils.comp"
 
 shared uint lightIndices[4096];
+shared uint levelStack[16 * 5];
+shared uvec2 collisionStack[16 * 5];
+
 
 // ------------- VARIABLES -------------
 ViewFrustum createFrustum(uvec3 clusterID)
@@ -226,6 +229,9 @@ void main()
 	uint index = gl_GlobalInvocationID.x / gl_SubgroupSize;
 	uint sharedMemoryOffset = (4096 / gl_NumSubgroups) * gl_SubgroupID;
 
+	if (gl_LocalInvocationIndex < 80)
+		levelStack[gl_LocalInvocationIndex] = 0;
+
 	// discard warps out of bounds
 	if (index > comp.counter)
 		return;
@@ -241,17 +247,18 @@ void main()
 	if (maxLevel > 0)
 	{
 		uint currentLevel = maxLevel;
-		uint levelOffsets[5] = uint[](0, 0, 0, 0, 0);
-		uvec2 collisions[5];
 
 		// set start of recursion
 		Node node = bvh.nodes[levelParam[currentLevel].offset + gl_SubgroupInvocationID];
-		collisions[currentLevel] = subgroupBallot(collideAABB(frustum, node)).xy;
+
+		uvec2 collision = subgroupBallot(collideAABB(frustum, node)).xy;
+		if (subgroupElect())
+			collisionStack[gl_SubgroupID * 5 + currentLevel] = collision;
 				
 		while (true)
 		{
-			uint index = subgroupBallotFindLSB(uvec4(collisions[currentLevel], 0, 0));
-			if (index >= gl_SubgroupSize || index >= (levelParam[currentLevel].count - levelOffsets[currentLevel]))
+			uint index = subgroupBallotFindLSB(uvec4(collisionStack[gl_SubgroupID * 5 + currentLevel], 0, 0));
+			if (index >= gl_SubgroupSize || index >= (levelParam[currentLevel].count - levelStack[gl_SubgroupID * 5 + currentLevel]))
 			{
 				if (currentLevel == maxLevel)
 					break;
@@ -260,23 +267,29 @@ void main()
 				continue;
 			}
 
-			// zero current index
-			if (index < 32) collisions[currentLevel].x &= ~(1 << index);
-			else collisions[currentLevel].y &= ~(1 << (index & ~0x20));
+			if (subgroupElect())
+			{
+				// zero current index
+				if (index < 32) collisionStack[gl_SubgroupID * 5 + currentLevel].x &= ~(1 << index);
+				else collisionStack[gl_SubgroupID * 5 + currentLevel].y &= ~(1 << (index & ~0x20));
 
-			// set offset for next level
-			levelOffsets[currentLevel - 1] = (levelOffsets[currentLevel] + index) * gl_SubgroupSize;
+				// set offset for next level
+				levelStack[gl_SubgroupID * 5 + currentLevel - 1] = (levelStack[gl_SubgroupID * 5 + currentLevel] + index) * gl_SubgroupSize;
+			}
+
 
 			if (currentLevel > 1)
 			{
 				currentLevel--;
 
 				// set collisions for next level
-				Node node = bvh.nodes[levelParam[currentLevel].offset + levelOffsets[currentLevel] + gl_SubgroupInvocationID];
-				collisions[currentLevel] = subgroupBallot(collideAABB(frustum, node)).xy;
+				Node node = bvh.nodes[levelParam[currentLevel].offset + levelStack[gl_SubgroupID * 5 + currentLevel] + gl_SubgroupInvocationID];
+				uvec2 collision = subgroupBallot(collideAABB(frustum, node)).xy;
+				if (subgroupElect())
+					collisionStack[gl_SubgroupID * 5 + currentLevel] = collision;
 			}
 			else
-				testLastLevelCollisions(frustum, levelOffsets[0]);
+				testLastLevelCollisions(frustum, levelStack[gl_SubgroupID * 5]);
 		}
 	}
 	else
